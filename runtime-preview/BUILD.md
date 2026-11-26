@@ -1,6 +1,6 @@
 # ScarlettMac Runtime Preview
 
-ScarlettMac Runtime Preview builds an x86-64 Windows executable for Apple Silicon Macs running Wine and Rosetta. The default VIctory-macOS recipe includes a cap for recycled CPU snapshot buffers and an opt-in fix for direct pixel-center barycentrics, the weights a pixel shader uses to interpolate across a triangle. The ScarlettMac XCL build has its own source and license.
+ScarlettMac Runtime Preview builds an x86-64 Windows executable for Apple Silicon Macs running Wine and Rosetta. Both recipes identify the runtime as ScarlettMac in the window title and CLI help. The default VIctory-macOS recipe includes a cap for recycled CPU snapshot buffers and an opt-in fix for direct pixel-center barycentrics, the weights a pixel shader uses to interpolate across a triangle. The ScarlettMac XCL build has its own source and license.
 
 ## Build and test
 
@@ -30,7 +30,7 @@ The optional checkpoint uses a newer [VIctory-macOS revision](checkpoint/UPSTREA
 LLVM_MINGW_ROOT=/path/to/llvm-mingw ./build.sh --checkpoint "$HOME/scarlettmac-checkpoint-src"
 ```
 
-Run `config` as shown below with the checkpoint's `target/x86_64-pc-windows-gnullvm/diag/victory.exe`. The checkpoint uses the same launcher and adds ScarlettMac to the window statistics and CLI help.
+Run `config` as shown below with the checkpoint's `target/x86_64-pc-windows-gnullvm/diag/victory.exe`. The checkpoint uses the same launcher.
 
 | Optional setting | Effect in the checkpoint |
 | --- | --- |
