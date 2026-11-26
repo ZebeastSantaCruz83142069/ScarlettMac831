@@ -73,7 +73,7 @@ ScarlettMac is an experimental Xbox Series X|S compatibility project for Apple S
 | --- | --- |
 | ScarlettMac XCL | First-run menus accepted controller input. The game reached world loading and read scene assets. |
 | ScarlettMac Runtime Preview checkpoint | Confirmed the offline player picker from a launcher marker and reached story loading. The game stopped during a timing check. |
-| ScarlettMac development builds | Rendered parts of the 3D opening. A separate Gone Fishing save replay reached its first heavy 3D frame, but the image was washed out. Walking and camera control remain unverified. |
+| ScarlettMac development builds | Rendered the Prologue yard and reached the movement tutorial. The game read both sticks at the tutorial. A separate Gone Fishing replay reached its first heavy 3D frame. Both scenes were overexposed. Walking and camera control remain unverified. |
 | Local Cool Fox experiments | Rendered a lit street and a character close-up during the opening. Later trials hit a D3DMetal read fault. |
 
 [Latest native-window tests](docs/compatibility.md#november-26-and-27-native-window-tests) · [Runtime checkpoint](docs/compatibility.md#scarlettmac-runtime-preview-checkpoint) · [Cool Fox graphics tests](docs/compatibility.md#cool-fox-graphics-experiments)
