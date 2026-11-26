@@ -2,3 +2,4 @@
 0002-local-gameinput-timeline.patch
 0003-wine-mesh-limit-and-gpu-wait.patch
 0004-scarlettmac-product-name.patch
+0006-queue-wait-order.patch
