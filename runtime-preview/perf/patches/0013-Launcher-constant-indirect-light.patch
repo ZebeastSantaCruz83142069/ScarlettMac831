@@ -1,0 +1,32 @@
+From 89b5dffae860bc8a9baa313dcf33d47a77b69636 Mon Sep 17 00:00:00 2001
+From: jgrizon
+Date: Fri, 27 Nov 2026 17:18:57 +0100
+Subject: [PATCH 13] Launcher: constant indirect light (VICTORY_AMBIENT=1.0)
+ instead of the estimate
+
+The title's compute BVH builder never runs with VICTORY_HALVES_LOCAL, so its
+probe resolve leaves almost nothing and whatever the sun does not reach is
+black. The estimate's floor (~0.04) keeps 99-100% of points under it; the
+constant stand-in lights faces, skin and clothing. World frames in the first
+120 s on a 24 GB M5 Pro: 503 and 586 with it, 538 without (same session).
+Diagnostics build: 431 vs 386.
+---
+ tools/macos/play-main-mac.sh | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/tools/macos/play-main-mac.sh b/tools/macos/play-main-mac.sh
+index 2834e1b..b363f90 100755
+--- a/tools/macos/play-main-mac.sh
++++ b/tools/macos/play-main-mac.sh
+@@ -8,7 +8,7 @@ d() { eval "[ -n \"\${$1+x}\" ]" || export "$1=$2"; }
+ d VICTORY_PATCH_MASKED all;        d VICTORY_FAULT_TRACKING 1
+ d VICTORY_HALVES_LOCAL 1;          d VICTORY_HALVES_SHARED_LDS 1
+ d VICTORY_HALVES_EXCHANGE 1;       d VICTORY_HALVES_WALK 1
+-d VICTORY_GUARD_LOOKUP 1;          d VICTORY_AMBIENT estimate
++d VICTORY_GUARD_LOOKUP 1;          d VICTORY_AMBIENT 1.0
+ d VICTORY_MAPDATA_BUDGET 40;       d VICTORY_COPY_ORDER split
+ d VICTORY_BATCH_CLAMPS 1;          d VICTORY_UAV_SIZE_LEVEL0 07f451a14b13fecb
+ d VICTORY_TEXTURE_BACK 256x256f41,256x256f16,64x64f16,128x128f36
+-- 
+2.56.0
+
