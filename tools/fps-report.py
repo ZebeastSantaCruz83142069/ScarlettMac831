@@ -241,7 +241,7 @@ def report_summary(info):
           % (min(fps_values) if fps_values else float("nan")))
     print("  max fps over segments              %8.2f"
           % (max(fps_values) if fps_values else float("nan")))
-    if mean_fps == mean_fps:
+    if mean_fps > 0:
         print("  mean frame period implied          %8.1f ms" % (1000.0 / mean_fps))
     if info["last_ts"] is not None:
         tail = (info["last_ts"] - last_t).total_seconds()
@@ -390,13 +390,14 @@ def report_curve(info, bucket):
             span = (when - waits[index - 1][0]).total_seconds()
             print("  %-10s %7d %8d %10.2f"
                   % (clock(when), count, immediate, count / span if span > 0 else float("nan")))
-        total_span = sum((waits[i][0] - waits[i - 1][0]).total_seconds()
-                         for i in range(1, len(waits)))
-        total_waits = sum(w[1] for w in waits)
-        print("  %d waits over %.1f s = %.1f waits/s; note this is not fps - the runtime"
-              % (total_waits, total_span, total_waits / total_span))
-        print("  makes about two waits per presented frame here, and 'N of them ended at once'"
-              " is the share that did not block")
+        total_span = (waits[-1][0] - waits[0][0]).total_seconds()
+        if total_span > 0:
+            # There is no preceding wait sample to time the first interval.
+            total_waits = sum(w[1] for w in waits[1:])
+            print("  %d waits over %.1f s = %.1f waits/s; note this is not fps - the runtime"
+                  % (total_waits, total_span, total_waits / total_span))
+            print("  makes about two waits per presented frame here, and 'N of them ended at once'"
+                  " is the share that did not block")
 
 
 def report_cost(info, mean_fps, steady_fps):
@@ -416,19 +417,20 @@ def report_cost(info, mean_fps, steady_fps):
                  100.0 * moves / period, prep))
 
     moves = [c[4] for c in costs]
-    mb = [c[3] for c in costs]
-    refreshes = [c[2] for c in costs]
+    mean_refreshes = statistics.mean(c[2] for c in costs)
+    mean_mb = statistics.mean(c[3] for c in costs)
     mean_moves = statistics.mean(moves)
     print("  mean over %d samples: %.1f MB/frame, %.2f ms/frame (median %.2f, max %.2f)"
-          % (len(costs), statistics.mean(mb), mean_moves, statistics.median(moves), max(moves)))
+          % (len(costs), mean_mb, mean_moves, statistics.median(moves), max(moves)))
     print("  => %.0f%% of the steady frame period, %.0f%% of wall time"
           " (%.2f ms x %.2f frames/s over the run)"
           % (100.0 * mean_moves / period if period else float("nan"),
              100.0 * mean_moves * mean_fps / 1000.0 if mean_fps else float("nan"),
              mean_moves, mean_fps))
-    print("  per engine refresh: %.2f ms (%.2f ms/frame / %.1f refreshes/frame), %.1f MB"
-          % (mean_moves / statistics.mean(refreshes), mean_moves, statistics.mean(refreshes),
-             statistics.mean(mb) / statistics.mean(refreshes)))
+    if mean_refreshes > 0:
+        print("  per engine refresh: %.2f ms (%.2f ms/frame / %.1f refreshes/frame), %.1f MB"
+              % (mean_moves / mean_refreshes, mean_moves, mean_refreshes,
+                 mean_mb / mean_refreshes))
 
     lines = info["refreshes"]
     if lines:
