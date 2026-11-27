@@ -39,7 +39,7 @@ Run `config` as shown below with the checkpoint's `target/x86_64-pc-windows-gnul
 | `VICTORY_TRACE_RETURNED_STICKS=1` | Logs the title's stick readings when an axis crosses a reporting threshold, with the present serial. |
 | `VICTORY_LINK_MESH_OUTPUTS=0` | Disables the mesh output linking that is enabled by default under Wine. |
 
-Under Wine, the checkpoint skips mesh pipelines that still exceed Metal's 32 KiB output limit. Submission diagnostics identify the pipelines on a native GPU wait that exceeds eight seconds. Guarded development tests on an M3 Max rendered parts of the Series S opening with severe visual artifacts. The local tests used additional launcher settings, and repeatable player and camera control remain unverified.
+Under Wine, the checkpoint skips mesh pipelines that still exceed Metal's 32 KiB output limit. Submission diagnostics identify the pipelines on a native GPU wait that exceeds eight seconds. A queue's held work now runs before its next memory wait is tested, so a wait no longer passes or holds on a value that earlier work in the same queue overwrites. Without this, the Series S intro could stall in `Prestream` and end at the title's `+0x23cf683` or `+0x2215c35` check. Guarded development tests on an M3 Max rendered parts of the Series S opening with severe visual artifacts. The local tests used additional launcher settings, and repeatable player and camera control remain unverified.
 
 ## Wine startup
 
