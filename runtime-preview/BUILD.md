@@ -78,6 +78,21 @@ tools/macos/play-main-mac.sh "/path/to/the/game/executable" --console series-s
 
 Known issues: after 4 to 5 minutes, swap grows again by about 2 GB and some minutes drop to 1 fps. The opening credits show a flat green panel where a video should play. `VICTORY_COPY_FAST` and `VICTORY_ALIAS_BUFFERS` are off by default because both still crash.
 
+### Measured on a 128 GB M5 Max
+
+These are release builds of this recipe on macOS 27.2.1, with CrossOver Wine 26.3.0 built from the same two patches and D3DMetal 4.0b3. Each run lasted 7 minutes from launch, with the shader and pipeline caches warm. The numbers are the median of the 5-second frame reports that drew at least 1,000 draws a frame.
+
+| Settings over `play-main-mac.sh` | Median FPS | Median frame | Draws dropped per frame |
+| --- | --- | --- | --- |
+| `--console series-s` (the recipe) | 3.9 | 257 ms | 200 |
+| `--console series-s`, `VICTORY_AMBIENT=1.0` | 4.1 | 245 ms | 263 |
+| `--console series-x` | 3.2 | 308 ms | 341 |
+| `--console series-x`, `VICTORY_OUTPUT=1920x1080` | 3.6 | 280 ms | 339 |
+
+`VICTORY_AMBIENT=1.0` replaces `estimate` with a fixed indirect-light floor. It lit faces and rooms that otherwise showed as silhouettes indoors and in backlit shots, and it did not cost frames here.
+
+The opening scene renders black on every launch. A diagnostics run with `VICTORY_PIPELINE_LOG` showed that this is not caused by missing pipelines. All 2,115 pipelines the run used were built, 2,679 of them loaded from the saved library, and the background queue was empty before the world started. During the opening scene, the frame reports still show 1,000 to 2,800 dropped draws a frame with 0 pipelines being made, and the image stays black. Later in the world the drops settle at about 265 a frame. Those drops come from a path other than pipeline creation, for example held-back BVH builder dispatches or draws whose bind fails.
+
 ## Wine startup
 
 Supply Rosetta and a compatible Wine installation with Apple D3DMetal. For setup details, see [VIctory-macOS](https://github.com/pragyaangaur/VIctory-macOS/blob/23ff1f7540952533b283d996a4f3f6710a6f6e85/README.md) and Apple's [Game Porting Toolkit](https://developer.apple.com/games/game-porting-toolkit/).
