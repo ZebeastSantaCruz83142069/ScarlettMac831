@@ -1,6 +1,6 @@
 # ScarlettMac Runtime Preview
 
-ScarlettMac Runtime Preview builds an x86-64 Windows executable for Apple Silicon Macs running Wine and Rosetta. The default and checkpoint recipes identify the runtime as ScarlettMac in the window title and CLI help. The default VIctory-macOS recipe includes a cap for recycled CPU snapshot buffers and an opt-in fix for direct pixel-center barycentrics, the weights a pixel shader uses to interpolate across a triangle. The ScarlettMac XCL build has its own source and license.
+ScarlettMac Runtime Preview builds an x86-64 Windows executable for Apple Silicon Macs running Wine and Rosetta. All three recipes identify the runtime as ScarlettMac in the window title and CLI help. The default VIctory-macOS recipe includes a cap for recycled CPU snapshot buffers and an opt-in fix for direct pixel-center barycentrics, the weights a pixel shader uses to interpolate across a triangle. The ScarlettMac XCL build has its own source and license.
 
 ## Build and test
 
@@ -44,7 +44,7 @@ Under Wine, the checkpoint skips mesh pipelines that still exceed Metal's 32 KiB
 
 ## November 27 performance recipe
 
-The optional performance recipe pins a [VIctory-macOS fork](perf/UPSTREAM) and applies one [patch](perf/patches/series). In the Series S intro on a 24 GB M5 Pro, the game world ran at about 4 fps, up from about 1 fps. The median frame took 225 to 255 ms, and the slowest 5% took 0.3 to 0.4 s.
+The optional performance recipe pins a [VIctory-macOS fork](perf/UPSTREAM) and applies its [patch series](perf/patches/series). In the contributor's Series S intro tests on a 24 GB M5 Pro, the game world ran at about 4 fps, up from about 1 fps. The median frame took 225 to 255 ms, and the slowest 5% took 0.3 to 0.4 s.
 
 | World frames in the first 120 s | Runs |
 | --- | --- |
@@ -58,16 +58,23 @@ What changed:
 - Write faults that Wine reports with extra protection bits, or on pages reserved first and committed later, are healed instead of crashing.
 - A compute shader that reads a buffer's size from its descriptor is now translated instead of dropped.
 
-Prepare the source, build its patched Wine, then play with the measured settings:
+On an M3 Max with 48 GB, a release build with the precompiled clamp rendered a lit character and yard in the Series S intro. The test used 720p game output, desktop FSR, and a local CrossOver 26.3-derived Wine with D3DMetal 4.0 beta 3. Runtime FPS samples ranged from about 1 to 3. The guard ended the run at 480.2 seconds. Player and camera response remain unverified.
+
+Set `DEPS` to an x86-64 prefix containing FreeType and GnuTLS. Prepare the source and build its patched Wine. [Pinned Wine setup guide](https://github.com/halfwave50/VIctory-macOS-halfwave/blob/8616bd67939a0a659dc50b02b52a291c73a73859/docs/macos.md#crossover-wine-with-d3dmetal-24-november-2026)
 
 ```sh
 ./build.sh --perf --prepare "$HOME/scarlettmac-perf-src"
 cd "$HOME/scarlettmac-perf-src"
-tools/macos/build-crossover-wine.sh
-tools/macos/play-main-mac.sh /path/to/the/game/executable
+DEPS=/path/to/x86-64-dependencies tools/macos/build-crossover-wine.sh
 ```
 
-`play-main-mac.sh` builds a release executable and sets every switch the numbers were measured with. A setting you export first wins. `LLVM_MINGW_ROOT=/path/to/llvm-mingw SCARLETTMAC_BUILD_PROFILE=release ./build.sh --perf NEW_SOURCE_DIR` builds only the executable. Without `SCARLETTMAC_BUILD_PROFILE` it builds the slower diagnostics profile.
+Install the D3DMetal redistributable from Apple's game evaluation environment into the built Wine's `target/wine-cx/lib` as described in the guide. Use the Series S profile to match the contributor's test.
+
+```sh
+tools/macos/play-main-mac.sh "/path/to/the/game/executable" --console series-s
+```
+
+`play-main-mac.sh` builds a release executable and sets the contributor's performance switches. A setting you export first wins. `LLVM_MINGW_ROOT=/path/to/llvm-mingw SCARLETTMAC_BUILD_PROFILE=release ./build.sh --perf NEW_SOURCE_DIR` builds only the executable. Without `SCARLETTMAC_BUILD_PROFILE` it builds the slower diagnostics profile.
 
 Known issues: after 4 to 5 minutes, swap grows again by about 2 GB and some minutes drop to 1 fps. The opening credits show a flat green panel where a video should play. `VICTORY_COPY_FAST` and `VICTORY_ALIAS_BUFFERS` are off by default because both still crash.
 

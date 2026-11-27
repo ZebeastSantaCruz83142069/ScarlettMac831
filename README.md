@@ -169,7 +169,7 @@ The repository distributes project source, patches, and launcher scripts. Supply
 
 ## ScarlettMac Runtime Preview
 
-The preview builds from pinned VIctory-macOS source. The November 26 checkpoint accepts an offline-picker confirmation marker, checks mesh pipelines against Metal’s output limit, and offers an input trace for testing in-world controls. The November 27 performance recipe reaches about 4 fps in the intro's game world on a 24 GB M5 Pro, up from about 1 fps. [Build and verify ScarlettMac Runtime Preview](runtime-preview/BUILD.md)
+The preview builds from pinned VIctory-macOS source. The November 26 checkpoint accepts an offline-picker confirmation marker, checks mesh pipelines against Metal’s output limit, and offers an input trace for testing in-world controls. The November 27 performance recipe rendered a lit Series S intro on an M3 Max, with runtime samples of about 1 to 3 fps. The recipe contributor reported about 4 fps on a 24 GB M5 Pro. Player and camera response remain unverified. [Build and verify ScarlettMac Runtime Preview](runtime-preview/BUILD.md)
 
 ## Credits and license
 
