@@ -3,7 +3,7 @@
 <p align="center">
   <a href="#tested-on-mac"><img src="https://img.shields.io/badge/macOS-Apple%20Silicon-0091FF" alt="macOS: Apple Silicon"></a>
   <a href="#tested-on-mac"><img src="https://img.shields.io/badge/Tested-M3%20Max-5832A8" alt="Tested on M3 Max"></a>
-  <a href="#captured-on-mac"><img src="https://img.shields.io/badge/ScarlettMac-3D%20opening-04a519" alt="ScarlettMac 3D opening"></a>
+  <a href="#captured-on-mac"><img src="https://img.shields.io/badge/ScarlettMac-Prologue%20controls-04a519" alt="Verified Prologue controls"></a>
   <a href="https://discord.gg/EJKCj64geW"><img src="https://img.shields.io/badge/Discord-Join%20the%20community-5865F2?logo=discord&amp;logoColor=white" alt="Discord community"></a>
 </p>
 
@@ -11,7 +11,30 @@
 
 <a name="latest-captures"></a>
 
-## Major breakthroughs on Apple Silicon
+## Prologue movement and camera on M3 Max
+
+<sub>November 27, 2026 · MacBook Pro, M3 Max, 48 GB · CrossOver Wine + D3DMetal · Series S, 720p output</sub>
+
+ScarlettMac rendered the prison room and responded to movement and camera input. Opposite camera inputs turned the view in opposite directions, with a steady view between them. Movement input walked Lucia away from the window and across the room. The tutorial advanced to the prompt to approach a cellmate.
+
+<table>
+  <tr>
+    <td width="50%" align="center">
+      <a href="assets/captures/prologue-prison-controls.jpg"><img src="assets/captures/prologue-prison-controls.jpg" width="520" alt="ScarlettMac shows Lucia at the prison window with movement and camera prompts"></a>
+    </td>
+    <td width="50%" align="center">
+      <a href="assets/captures/prologue-cellmate-objective.jpg"><img src="assets/captures/prologue-cellmate-objective.jpg" width="520" alt="Lucia across the prison room with the prompt to approach a cellmate"></a>
+    </td>
+  </tr>
+  <tr>
+    <td align="center"><strong>Movement and camera tutorial</strong></td>
+    <td align="center"><strong>Next objective after walking across the room</strong></td>
+  </tr>
+</table>
+
+Frame rate was roughly 1 to 3 fps during the room test. Part of the opening showed subtitles over a black picture, and rendering artifacts remained visible. The test ended at the cellmate prompt. [Runtime Preview build and settings](runtime-preview/BUILD.md#november-27-prologue-controls-trial)
+
+## Earlier opening captures
 
 <p align="center">
   <img src="https://img.shields.io/badge/First%20character%20close--up%20on%20MacBook-D1242F?style=for-the-badge" alt="First character close-up on MacBook"><br>
@@ -32,9 +55,6 @@
     <td align="center"><strong>Night street scene</strong><br>Third-person view of the character, car, and street lighting.</td>
   </tr>
 </table>
-
-> [!WARNING]
-> **In development.** GTA VI gameplay is currently unavailable. Walking and camera control in a visible scene remain unverified.
 
 [Prologue test details](docs/compatibility.md#prologue-rendering-breakthroughs)
 
@@ -63,7 +83,7 @@ The contributor traced missing lighting to compute shaders written for the conso
   </tr>
 </table>
 
-In the contributor’s 18 GB tests, the title reached about 14 GB of memory footprint, system swap reached 7 to 9 GB, and world frames took 2 to 30 seconds. Interactive gameplay remains unverified. The [measurement guide](docs/runbook.md) describes how to compare runtime logs.
+In the contributor’s 18 GB tests, the title reached about 14 GB of memory footprint, system swap reached 7 to 9 GB, and world frames took 2 to 30 seconds. Those tests measured rendering. See the [measurement guide](docs/runbook.md) for comparing runtime logs.
 
 ## Earlier captures
 
@@ -88,7 +108,7 @@ These images are from tests that preceded the captures above. They are ordered f
   </tr>
 </table>
 
-[Replay details](docs/compatibility.md#scarlettmac-opening-cinematic) · [Development test results](docs/compatibility.md#recent-development-tests)
+[Replay details](docs/compatibility.md#scarlettmac-opening-cinematic) · [Development test results](docs/compatibility.md#earlier-development-tests)
 
 ScarlettMac is an experimental Xbox Series X|S compatibility project for Apple Silicon Macs. The XCL build and ScarlettMac Runtime Preview both run through CrossOver. [XCL](https://github.com/xcl-dev/xcl)
 
@@ -100,10 +120,11 @@ ScarlettMac is an experimental Xbox Series X|S compatibility project for Apple S
 | --- | --- |
 | ScarlettMac XCL | First-run menus accepted controller input. The game reached world loading and read scene assets. |
 | ScarlettMac Runtime Preview checkpoint | Confirmed the offline player picker from a launcher marker and reached story loading. The game stopped during a timing check. |
-| ScarlettMac development builds | Rendered the Prologue yard and reached the movement tutorial. The game read both sticks at the tutorial. A separate Gone Fishing replay reached its first heavy 3D frame. Both scenes were overexposed. Walking and camera control remain unverified. |
+| ScarlettMac Runtime Preview performance build | Rendered the lit Prologue prison room, responded to camera and movement input, and advanced to the cellmate objective at roughly 1 to 3 fps. |
+| Earlier ScarlettMac experiments | Rendered the overexposed Prologue yard. A separate Gone Fishing replay reached its first heavy 3D frame. |
 | Local Cool Fox experiments | Rendered a lit street and a character close-up during the opening. Later trials hit a D3DMetal read fault. |
 
-[Latest native-window tests](docs/compatibility.md#november-26-and-27-native-window-tests) · [Runtime checkpoint](docs/compatibility.md#scarlettmac-runtime-preview-checkpoint) · [Cool Fox graphics tests](docs/compatibility.md#cool-fox-graphics-experiments)
+[Latest native-window tests](docs/compatibility.md#november-27-in-world-controls) · [Runtime checkpoint](docs/compatibility.md#scarlettmac-runtime-preview-checkpoint) · [Cool Fox graphics tests](docs/compatibility.md#cool-fox-graphics-experiments)
 
 ### XCL launch milestones
 
@@ -169,7 +190,7 @@ The repository distributes project source, patches, and launcher scripts. Supply
 
 ## ScarlettMac Runtime Preview
 
-The preview builds from pinned VIctory-macOS source. The November 26 checkpoint accepts an offline-picker confirmation marker, checks mesh pipelines against Metal’s output limit, and offers an input trace for testing in-world controls. The November 27 performance recipe rendered a lit Series S intro on an M3 Max, with runtime samples of about 1 to 3 fps. The recipe contributor reported about 4 fps on a 24 GB M5 Pro. Player and camera response remain unverified. [Build and verify ScarlettMac Runtime Preview](runtime-preview/BUILD.md)
+The preview builds from pinned VIctory-macOS source. The November 26 checkpoint accepts an offline-picker confirmation marker, checks mesh pipelines against Metal’s output limit, and offers an input trace for testing in-world controls. The November 27 performance recipe reached and verified movement and camera response in the lit Series S Prologue room on an M3 Max, at about 1 to 3 fps. The recipe contributor reported about 4 fps on a 24 GB M5 Pro. [Build and verify ScarlettMac Runtime Preview](runtime-preview/BUILD.md)
 
 ## Credits and license
 

@@ -1,10 +1,27 @@
 # Compatibility results
 
-Tested on an Apple M3 Max with CrossOver Preview 27.0.0.41073 and D3DMetal 4.0b3.
+Tested on an Apple M3 Max with D3DMetal 4.0 beta 3. The November 27 controls trial used a locally built CrossOver 26.3 Wine. Earlier tests also used CrossOver Preview 27.0.0.41073.
+
+## November 27 in-world controls
+
+In native-window run 7317, the November 27 ScarlettMac Runtime Preview release (`59a1fe8`) rendered the Series S Prologue prison room on an M3 Max with 48 GB of unified memory. Desktop FidelityFX 3.1.6 upscaled 853 × 480 to 1280 × 720. The run loaded a copy of the Prologue save with Large subtitles and started with a fresh renderer cache.
+
+| Check | Observed result |
+| --- | --- |
+| Camera | Scripted J and L holds turned the camera in opposite directions. The view stayed steady between the holds. |
+| Character movement | Scripted S, D and W holds moved Lucia away from the window and across the room. The tutorial advanced to “Approach a cellmate to interact with them.” |
+| Startup and exit | Subtitles appeared during a black interval before the room rendered. The run was closed manually after about nine minutes. |
+
+| Sampled gameplay interval | Samples | Median FPS | Median frame time | Median draws per frame |
+| --- | ---: | ---: | ---: | ---: |
+| Settled view of the window and bunk | 15 | 2.4 | 413.4 ms | 4,794 |
+| Settled view of the wall and poster after movement | 13 | 3.1 | 326.1 ms | 2,465 |
+
+The later movement sequence had a median of 2.8 fps across 12 samples. Each sample covered at least five seconds. The two settled views had zero pipelines building and zero indirect drops. The frame rate depended on the view and the sampled phase. This verifies movement inside the Prologue room. First-mission completion remains unverified. [Runtime reproduction](../runtime-preview/BUILD.md#november-27-prologue-controls-trial)
 
 ## November 26 and 27 native window tests
 
-These Series S tests used a local development build of ScarlettMac with four shader fixes, desktop AMD FSR 3.1.6, and a 720p game output profile.
+These earlier Series S tests used a local development build of ScarlettMac with four shader fixes, desktop AMD FSR 3.1.6, and a 720p game output profile.
 
 | Test | Observed result |
 | --- | --- |
@@ -13,7 +30,7 @@ These Series S tests used a local development build of ScarlettMac with four sha
 | Prologue movement tutorial | A Series S replay with the 720p layer as the base reached the prison yard and displayed both movement prompts. After the prompts, the game read opposite right-stick directions, forward left-stick input, and neutral releases. The native window remained overexposed and ran at about 0.7 fps during the test. The images did not establish visible movement from those inputs. The run ended at its 850-second time limit. |
 | Gone Fishing save replay | A run with the FSR sampling trace disabled read the save and recorded 22,564 draws on its first heavy 3D frame. The saved frame was almost white. The memory guard stopped the run after 127.4 seconds, before the movement check could start. |
 
-Two earlier runs with the FSR sampling trace enabled read the same Gone Fishing save and stayed on loading artwork. One run reaching the scene with the trace disabled does not establish the cause of the loading stalls. Gameplay remains unavailable.
+Two earlier runs with the FSR sampling trace enabled read the same Gone Fishing save and stayed on loading artwork. The cause of the loading stalls remains open.
 
 ## Prologue rendering breakthroughs
 
@@ -25,7 +42,7 @@ On November 26, 2026, experimental runtimes on an Apple M3 Max with CrossOver an
 | Series S Prologue with desktop AMD FSR | The title read the 250,880-byte Prologue save data. AMD FSR 3.1.6 upscaled the game from 1280 × 720 to 1920 × 1080. [Frame 3129](../assets/captures/prologue-prison-yard.png) showed a fenced yard and a guard tower. | Lighting was heavily overexposed. The memory guard ended the run at 179 seconds. |
 | Series S Prologue with 1080p compositing | A separate run read the same save and reproduced the yard in frame 3205, with people visible near the watchtower. The runtime blended the display layers into a 1080p output. | The memory guard ended the run at 162 seconds, before a controlled camera test. |
 
-These tests establish visible 3D output. Sustained rendering, walking, and camera control in a visible scene remain unverified. The public XCL build's measured milestone remains world loading.
+These November 26 trials established visible 3D output before controls were verified in the later ScarlettMac Runtime Preview run. The public XCL build's measured milestone remains world loading.
 
 ## Cool Fox graphics experiments
 
@@ -48,13 +65,13 @@ The November 26 Series S checkpoint passed its CrossOver configuration and execu
 | Round-based GPU atomic locks | Story loading continued with multi-second delays in title-memory preparation. The game hit the same timing check. |
 | Full-copy title-memory refresh | This removed the multi-second page-protection delays. The measured heap-texture upload step still took about 5 seconds of wall time in one slow interval, and the game stopped. |
 
-The [source checkpoint](../runtime-preview/BUILD.md#november-26-source-checkpoint) includes Metal mesh-output validation, GPU wait diagnostics, and optional GameInput tracing. The trace can verify the stick values returned to the game. A rendered response to those values remains to be verified.
+The [source checkpoint](../runtime-preview/BUILD.md#november-26-source-checkpoint) includes Metal mesh-output validation, GPU wait diagnostics, and optional GameInput tracing. The trace verified the stick values returned to the game. The later performance recipe verified the rendered response.
 
-## Recent development tests
+## Earlier development tests
 
 | Area | Observed on M3 Max |
 | --- | --- |
-| Opening and input | The experimental runtime rendered the live 3D opening. A separate guarded run verified pause and resume input. Player movement and camera control remain unverified. |
+| Opening and input | The experimental runtime rendered the live 3D opening. A separate guarded run verified pause and resume input. |
 | Memory | With four expanded pools, the host presented at least 130 frames after the first visible 3D frame. Neither earlier game assertion recurred before the host memory guard ended the test. |
 | Shader translation | The runtime translated two previously unsupported pixel shaders, created their D3DMetal pipelines, and used both during the live run. |
 
@@ -65,7 +82,7 @@ In the November 25, 2026 native-window shader test, the host presented at least 
 | [Skyline, frame 2982](../assets/captures/development-skyline.png) | The skyline was partially rendered. Both repaired pixel shaders had already been used in this run. |
 | [Pause menu, frame 2929](../assets/captures/development-pause-menu.png) | The pause menu opened over the cinematic during a separate native-window test. The opening resumed after closing it. |
 
-The opening showed severe rendering artifacts and performance below 1 FPS. Gameplay remains unavailable.
+The opening showed severe rendering artifacts and performance below 1 FPS in those November 25 trials.
 
 <a name="victory-opening-cinematic"></a>
 

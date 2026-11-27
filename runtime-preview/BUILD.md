@@ -40,7 +40,7 @@ Run `config` as shown below with the checkpoint's `target/x86_64-pc-windows-gnul
 | `VICTORY_LINK_MESH_OUTPUTS=0` | Disables the mesh output linking that is enabled by default under Wine. |
 | `VICTORY_WAVE64_REDUCE=1` | Enables experimental translation of supported 64-lane wave operations on 32-lane GPUs. |
 
-Under Wine, the checkpoint skips mesh pipelines that still exceed Metal's 32 KiB output limit. Submission diagnostics identify the pipelines on a native GPU wait that exceeds eight seconds. A queue's held work now runs before its next memory wait is tested, so a wait no longer passes or holds on a value that earlier work in the same queue overwrites. Without this, the Series S intro could stall in `Prestream` and end at the title's `+0x23cf683` or `+0x2215c35` check. Guarded development tests on an M3 Max rendered parts of the Series S opening with severe visual artifacts. The local tests used additional launcher settings, and repeatable player and camera control remain unverified.
+Under Wine, the checkpoint skips mesh pipelines that still exceed Metal's 32 KiB output limit. Submission diagnostics identify the pipelines on a native GPU wait that exceeds eight seconds. A queue's held work now runs before its next memory wait is tested, so a wait no longer passes or holds on a value that earlier work in the same queue overwrites. Without this, the Series S intro could stall in `Prestream` and end at the title's `+0x23cf683` or `+0x2215c35` check. Guarded development tests on an M3 Max rendered parts of the Series S opening with severe visual artifacts. Those checkpoint trials preceded the later performance recipe's controls verification.
 
 ## November 27 performance recipe
 
@@ -58,7 +58,7 @@ What changed:
 - Write faults that Wine reports with extra protection bits, or on pages reserved first and committed later, are healed instead of crashing.
 - A compute shader that reads a buffer's size from its descriptor is now translated instead of dropped.
 
-On an M3 Max with 48 GB, a release build with the precompiled clamp rendered a lit character and yard in the Series S intro. The test used 720p game output, desktop FSR, and a local CrossOver 26.3-derived Wine with D3DMetal 4.0 beta 3. Runtime FPS samples ranged from about 1 to 3. The guard ended the run at 480.2 seconds. Player and camera response remain unverified.
+An earlier M3 Max trial rendered a lit character and yard in the Series S intro at about 1 to 3 fps before the guard ended it at 480.2 seconds. The later controls trial reached the prison room and verified both walking and camera input.
 
 Set `DEPS` to an x86-64 prefix containing FreeType and GnuTLS. Prepare the source and build its patched Wine. [Pinned Wine setup guide](https://github.com/halfwave50/VIctory-macOS-halfwave/blob/8616bd67939a0a659dc50b02b52a291c73a73859/docs/macos.md#crossover-wine-with-d3dmetal-24-november-2026)
 
@@ -91,6 +91,36 @@ The performance recipe also includes pixel DPP8 translation when every read stay
 
 Create the input file before launch. Append `W 3` on its own line to hold W for three seconds, or `J 2 4` to hold J for two seconds after a four-second delay. Each command is relative to the time the runtime reads the line. Shader folding and cross-half counting use separate shader and pipeline cache identities.
 
+### November 27 Prologue controls trial
+
+Run 7317 used the performance recipe release at renderer revision `59a1fe8`, the precompiled 64-thread argument clamp, privately built CrossOver 26.3 Wine, and D3DMetal 4.0 beta 3. Series S and desktop FidelityFX from the 2.4.0 SDK produced 853 × 480 rendering at 1280 × 720 output. The local launcher copied an existing Prologue save with Large subtitles and began with a fresh cache. [Observed controls and frame measurements](../docs/compatibility.md#november-27-in-world-controls)
+
+To repeat the controls check, use a copy of your Prologue profile and a separate cache directory. Export `VICTORY_DATA_DIR` and `VICTORY_CACHE_DIR` with their Wine-visible paths. The example assumes an exported `WINEPREFIX`, a separately installed desktop FidelityFX DLL in `C:\amd-fsr-sdk-2.4.0`, and the prepared performance source from above. Confirm that the runtime logs `argument clamp: using precompiled 64-thread shader` and the render and output sizes above.
+
+```sh
+input_file="$WINEPREFIX/drive_c/scarlettmac-input.txt"
+touch "$input_file"
+VICTORY_OUTPUT=1280x720 VICTORY_PRESENT_PLANE=0 VICTORY_PRESENT_COMPOSITE=1 \
+  VICTORY_FIDELITYFX_DIR='C:\amd-fsr-sdk-2.4.0' \
+  VICTORY_SNAPSHOT_POOL_MIB=512 VICTORY_COALESCE_TRACKED_REFRESH=1 \
+  VICTORY_SPANS_QUICK=1 VICTORY_DETILE_ROWS=1 VICTORY_FRAME_WAITS=1 \
+  VICTORY_SHADER_OPT=2 VICTORY_HALVES_F64_COUNT=1 \
+  VICTORY_KEYS_FILE='C:\scarlettmac-input.txt' \
+  tools/macos/play-main-mac.sh "/path/to/the/game/executable" --console series-s
+```
+
+From another terminal, use the same path for `input_file`. Once the lit prison room appears, append the first sequence. Watch the camera turn in both directions and stay steady during the release intervals.
+
+```sh
+printf '%s\n' release 'J 8 6' 'L 8 22' 'W 8 38' >> "$input_file"
+```
+
+After the movement tutorial appears and the first sequence finishes, append the second sequence and watch for the cellmate prompt.
+
+```sh
+printf '%s\n' release 'S 8 5' 'D 8 21' 'W 8 37' >> "$input_file"
+```
+
 ## Wine startup
 
 Supply Rosetta and a compatible Wine installation with Apple D3DMetal. For setup details, see [VIctory-macOS](https://github.com/pragyaangaur/VIctory-macOS/blob/23ff1f7540952533b283d996a4f3f6710a6f6e85/README.md) and Apple's [Game Porting Toolkit](https://developer.apple.com/games/game-porting-toolkit/).
@@ -114,4 +144,4 @@ With a supported title supplied separately, pass `run --execute` followed by its
 
 In the default recipe, set `VICTORY_DIRECT_BARYCENTRICS=1` to enable the pixel shader fix on a D3D12 device that supports barycentrics. The runtime uses a separate shader cache for this option.
 
-The opening captures used a local development configuration with additional patches. Gameplay verification for this preview remains pending.
+The earlier opening captures used local development configurations. In-world control was verified in the later Prologue room trial above. First-mission completion remains unverified.
