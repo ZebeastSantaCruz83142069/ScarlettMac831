@@ -121,6 +121,21 @@ After the movement tutorial appears and the first sequence finishes, append the 
 printf '%s\n' release 'S 8 5' 'D 8 21' 'W 8 37' >> "$input_file"
 ```
 
+### Contributor measurements on a 128 GB M5 Max
+
+NotAOwner tested release builds of the earlier November 27 performance recipe on a 128 GB M5 Max, with macOS 27.2.1, patched CrossOver Wine 26.3.0 and D3DMetal 4.0 beta 3. The offline runs lasted seven minutes each from launch and used warm shader and pipeline caches. The table shows medians from five-second reports with at least 1,000 draws per frame. [Contributor test details](https://github.com/paveledits/ScarlettMac/pull/14)
+
+| Settings over `play-main-mac.sh` | Median FPS | Median frame time | Median dropped draws per frame |
+| --- | ---: | ---: | ---: |
+| `--console series-s` | 3.9 | 257 ms | 200 |
+| `--console series-s`, `VICTORY_AMBIENT=1.0` | 4.1 | 245 ms | 263 |
+| `--console series-x` | 3.2 | 308 ms | 341 |
+| `--console series-x`, `VICTORY_OUTPUT=1920x1080` | 3.6 | 280 ms | 339 |
+
+`VICTORY_AMBIENT=1.0` uses fixed indirect light in place of the estimate. The contributor reported better visibility for faces and rooms in indoor and backlit shots with this setting. [Lighting and frame-rate observations](https://github.com/paveledits/ScarlettMac/pull/14)
+
+The contributor's opening remained black after the background pipeline queue reached zero. Their diagnostic trace reported 2,679 pipeline library loads and four pipeline builds. The frame reports still counted 1,000 to 2,800 dropped draws per frame during the black opening, then about 265 in the world. The drop reasons remained unresolved. The M3 Max controls trial above also showed a black opening while pipeline work was still pending. The cause of the black image remains open. [Contributor pipeline diagnostic](https://github.com/paveledits/ScarlettMac/pull/14)
+
 ## Wine startup
 
 Supply Rosetta and a compatible Wine installation with Apple D3DMetal. For setup details, see [VIctory-macOS](https://github.com/pragyaangaur/VIctory-macOS/blob/23ff1f7540952533b283d996a4f3f6710a6f6e85/README.md) and Apple's [Game Porting Toolkit](https://developer.apple.com/games/game-porting-toolkit/).
