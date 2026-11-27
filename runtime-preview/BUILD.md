@@ -23,7 +23,7 @@ cargo test --locked -j 2 -p victory-gpu --lib snapshot_pool
 
 ## November 26 source checkpoint
 
-The optional checkpoint uses a newer [VIctory-macOS revision](checkpoint/UPSTREAM) and its own [patch list](checkpoint/patches/series). It adds local GameInput diagnostics and updates mesh pipeline handling under Wine. Use the same toolchain and choose a new output directory for each command.
+The optional checkpoint uses a newer [VIctory-macOS revision](checkpoint/UPSTREAM) and its own [patch list](checkpoint/patches/series). It adds local GameInput diagnostics, updates mesh pipeline handling under Wine, copies only the title pages that were written, and translates the console's 64-lane wave reductions, first-lane and cross-half lane reads for the Mac's 32-lane GPU (`VICTORY_WAVE64_REDUCE=1`), which improved lighting coverage in the contributor’s M3 Pro tests. Use the same toolchain and choose a new output directory for each command.
 
 ```sh
 ./build.sh --checkpoint --prepare "$HOME/scarlettmac-checkpoint-review"
@@ -38,6 +38,7 @@ Run `config` as shown below with the checkpoint's `target/x86_64-pc-windows-gnul
 | `VICTORY_KEYS_TRIGGER` | A Wine-visible marker path. When the file first appears, it starts the `VICTORY_KEYS` timeline. With the trigger set, `VICTORY_KEYS=0.5-1.5:W,2-3:J` holds those keys during the named intervals in seconds. Start with the marker absent and create it only at the scene being tested. |
 | `VICTORY_TRACE_RETURNED_STICKS=1` | Logs the title's stick readings when an axis crosses a reporting threshold, with the present serial. |
 | `VICTORY_LINK_MESH_OUTPUTS=0` | Disables the mesh output linking that is enabled by default under Wine. |
+| `VICTORY_WAVE64_REDUCE=1` | Enables experimental translation of supported 64-lane wave operations on 32-lane GPUs. |
 
 Under Wine, the checkpoint skips mesh pipelines that still exceed Metal's 32 KiB output limit. Submission diagnostics identify the pipelines on a native GPU wait that exceeds eight seconds. A queue's held work now runs before its next memory wait is tested, so a wait no longer passes or holds on a value that earlier work in the same queue overwrites. Without this, the Series S intro could stall in `Prestream` and end at the title's `+0x23cf683` or `+0x2215c35` check. Guarded development tests on an M3 Max rendered parts of the Series S opening with severe visual artifacts. The local tests used additional launcher settings, and repeatable player and camera control remain unverified.
 

@@ -38,6 +38,33 @@
 
 [Prologue test details](docs/compatibility.md#prologue-rendering-breakthroughs)
 
+## Lit world on an 18 GB M3 Pro with the checkpoint runtime
+
+<sub>November 26, 2026 · MacBook Pro, Apple M3 Pro, 18 GB · CrossOver Wine + D3DMetal · 1280×720 output</sub>
+
+The contributor traced missing lighting to compute shaders written for the console’s 64-lane waves. The November 26 checkpoint adds opt-in translation for supported wave reductions, first-lane reads and cross-half lane reads on the Mac’s 32-lane GPU (`VICTORY_WAVE64_REDUCE=1`). The contributor reported 50 distinct dropped compute shaders before the change and 28 with it enabled. [Checkpoint settings](runtime-preview/BUILD.md#november-26-source-checkpoint) · [Contributor’s measurements](https://github.com/paveledits/ScarlettMac/pull/6)
+
+<table>
+  <tr>
+    <td width="33%" align="center">
+      <a href="assets/captures/m3pro-before-wave64-black-geometry.png"><img src="assets/captures/m3pro-before-wave64-black-geometry.png" width="260" alt="Before: the opening's skyline with the character and buildings as near-black silhouettes"></a>
+    </td>
+    <td width="33%" align="center">
+      <a href="assets/captures/m3pro-lit-car-wave64.png"><img src="assets/captures/m3pro-lit-car-wave64.png" width="260" alt="After: a red car at night with reflections on the paint and a lit street lamp"></a>
+    </td>
+    <td width="33%" align="center">
+      <a href="assets/captures/m3pro-lit-street-wave64.png"><img src="assets/captures/m3pro-lit-street-wave64.png" width="260" alt="After: third-person view of the character on a night street beside the car, lamp light on a building"></a>
+    </td>
+  </tr>
+  <tr>
+    <td align="center"><strong>Before</strong><br>Lighting passes refused: black geometry.</td>
+    <td align="center"><strong>After</strong><br>Shaded car, paint reflections, street lamp.</td>
+    <td align="center"><strong>After</strong><br>Third-person street view, 400 s into the run.</td>
+  </tr>
+</table>
+
+In the contributor’s 18 GB tests, the title reached about 14 GB of memory footprint, system swap reached 7 to 9 GB, and world frames took 2 to 30 seconds. Interactive gameplay remains unverified. The [measurement guide](docs/runbook.md) describes how to compare runtime logs.
+
 ## Earlier captures
 
 These images are from tests that preceded the captures above. They are ordered from newer native-window tests down to the earliest XCL setup screens.
