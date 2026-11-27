@@ -1,0 +1,187 @@
+From 905d17aae873c3074b00dbaec5fff34e99d4e939 Mon Sep 17 00:00:00 2001
+From: Pavel <pavel.rogojin@icloud.com>
+Date: Fri, 27 Nov 2026 11:53:55 +0100
+Subject: [PATCH 05/10] Skip clearing empty descriptor census slots on request
+
+---
+ crates/victory-gpu/src/bindless.rs        | 105 +++++++++++++++++++++-
+ crates/victory-gpu/src/descriptor/host.rs |   6 +-
+ 2 files changed, 107 insertions(+), 4 deletions(-)
+
+diff --git a/crates/victory-gpu/src/bindless.rs b/crates/victory-gpu/src/bindless.rs
+index 59a866d..bde5f36 100644
+--- a/crates/victory-gpu/src/bindless.rs
++++ b/crates/victory-gpu/src/bindless.rs
+@@ -10,7 +10,7 @@
+ //! `crate::watch`).
+ 
+ use std::collections::{BTreeMap, HashMap};
+-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering::Relaxed};
++use std::sync::atomic::{AtomicBool, AtomicU64, Ordering::{Acquire, Relaxed, Release}};
+ use std::sync::{Arc, Mutex, OnceLock};
+ 
+ use crate::census_maps::{Counts, Hashing};
+@@ -43,6 +43,9 @@ pub(crate) struct Viewed {
+     /// [`Viewed::shard_of`]: every thread writing views into a heap stood in
+     /// the one lock (25,000 to 40,000 slots a world frame).
+     shards: Box<[Mutex<Inner>]>,
++    occupied: Box<[AtomicU64]>,
++    #[cfg(test)]
++    slot_locks: AtomicU64,
+     /// Slots rewritten in the census, an identical view not counted as one
+     /// (tests: the no-op path, or its absence).
+     #[cfg(test)]
+@@ -75,8 +78,27 @@ impl Viewed {
+     /// A census of `shards` shards, in either form whatever the switch says
+     /// (tests: both under one run).
+     fn with_shards(shards: usize) -> Self {
++        Self::with_slots(shards, 0)
++    }
++
++    pub(crate) fn for_heap(slots: u32) -> Self {
++        static QUICK: OnceLock<bool> = OnceLock::new();
++        let quick = *QUICK.get_or_init(|| {
++            let on = crate::switch::on("VICTORY_SPANS_QUICK");
++            if on {
++                tracing::info!("VICTORY_SPANS_QUICK=1: empty heap slots bypass the range census lock");
++            }
++            on
++        });
++        Self::with_slots(if shard_census_on() { SHARDS } else { 1 }, if quick { slots } else { 0 })
++    }
++
++    fn with_slots(shards: usize, slots: u32) -> Self {
+         Viewed {
+             shards: (0..shards.max(1)).map(|_| Mutex::new(Inner::default())).collect(),
++            occupied: (0..slots.div_ceil(64)).map(|_| AtomicU64::new(0)).collect(),
++            #[cfg(test)]
++            slot_locks: AtomicU64::new(0),
+             #[cfg(test)]
+             writes: AtomicU64::new(0),
+         }
+@@ -203,9 +225,16 @@ impl Viewed {
+     /// [`Viewed::set`] with what the slot's view reads already worked out
+     /// (`crate::descriptor::host`, "quick").
+     pub(crate) fn set_seen(&self, index: u32, seen: Option<Seen>) {
++        let occupied = self.occupied.get((index / 64) as usize);
++        let bit = 1u64 << (index % 64);
++        if seen.is_none() && occupied.is_some_and(|word| word.load(Acquire) & bit == 0) {
++            return;
++        }
+         // mac: a wait for it is counted with `VICTORY_HEAP_LOCKS`.
+         let shard = &self.shards[self.shard_of(index)];
+         let mut inner = crate::descriptor::slots::locked(shard, crate::descriptor::slots::CENSUS);
++        #[cfg(test)]
++        self.slot_locks.fetch_add(1, Relaxed);
+         // The slot holds what it is given already: nothing counts it again
+         // (a heap sync revisits the same slot between most lists, and each
+         // pass out and back in moves its ranges' hull and its copy's ends).
+@@ -216,12 +245,21 @@ impl Viewed {
+         }
+         #[cfg(test)]
+         self.writes.fetch_add(1, Relaxed);
+-        if let Some(old) = inner.slots.remove(&index) {
+-            inner.count(&old, false);
++        let old = inner.slots.remove(&index);
++        if let Some(old) = &old {
++            inner.count(old, false);
+         }
++        // Publish membership under the census lock, after updating its ranges.
+         if let Some(seen) = seen {
+             inner.count(&seen, true);
+             inner.slots.insert(index, seen);
++            if old.is_none()
++                && let Some(word) = occupied
++            {
++                word.fetch_or(bit, Release);
++            }
++        } else if let Some(word) = occupied {
++            word.fetch_and(!bit, Release);
+         }
+     }
+ 
+@@ -742,6 +780,67 @@ void main(uint3 id : SV_DispatchThreadID) {
+ 
+     const LINEAR: u32 = 0x100;
+ 
++    #[test]
++    fn fast_clear_keeps_the_census_in_slot_write_order() {
++        for shards in [1, SHARDS] {
++            let viewed = Viewed::with_slots(shards, 128);
++            let indices = || {
++                let mut textures = viewed.shards.iter().flat_map(|shard| {
++                    shard.lock().unwrap().textures.keys().copied().collect::<Vec<_>>()
++                }).collect::<Vec<_>>();
++                textures.sort_unstable();
++                textures
++            };
++
++            viewed.set_seen(65, None);
++            assert_eq!(viewed.slot_locks.load(Relaxed), 0);
++            std::thread::scope(|scope| {
++                scope.spawn(|| {
++                    viewed.set_seen(65, Some(Seen::Texture(1)));
++                    viewed.set_seen(66, Some(Seen::Texture(2)));
++                }).join().unwrap();
++            });
++            assert_eq!(indices(), [1, 2]);
++            viewed.set_seen(65, Some(Seen::Texture(3)));
++            assert_eq!(indices(), [2, 3]);
++            viewed.set_seen(65, None);
++            assert_eq!(indices(), [2]);
++            assert_eq!(viewed.slot_locks.load(Relaxed), 4);
++            viewed.set_seen(65, None);
++            assert_eq!(viewed.slot_locks.load(Relaxed), 4);
++            viewed.set_seen(66, None);
++            assert!(indices().is_empty());
++        }
++    }
++
++    #[test]
++    #[ignore = "requires a D3D12 device"]
++    fn fast_clear_keeps_the_remaining_buffer_span() {
++        let memory = vec![0u8; 0x1000];
++        let at = memory.as_ptr() as u64;
++        crate::shadow::register(at as usize, at, 0x1000);
++        let shadow = crate::shadow::find(at, 0x1000).expect("a synthetic D3D12 shadow buffer");
++        for slots in [0, 128] {
++            let viewed = Viewed::with_slots(SHARDS, slots);
++            let span = |from, len| Some(Seen::Buffer(shadow.clone(), at + from, len, false));
++            let ranges = || viewed.ranges().iter().map(|h| (h.1 - at, h.2)).collect::<Vec<_>>();
++
++            viewed.set_seen(65, span(0x100, 0x100));
++            viewed.set_seen(66, span(0x100, 0x100));
++            viewed.set_seen(65, span(0x800, 0x200));
++            assert_eq!(ranges(), [(0x100, 0x900)]);
++            viewed.set_seen(65, None);
++            assert_eq!(ranges(), [(0x100, 0x100)]);
++            let locks = viewed.slot_locks.load(Relaxed);
++            viewed.set_seen(65, None);
++            assert_eq!(viewed.slot_locks.load(Relaxed), locks + u64::from(slots == 0));
++            assert_eq!(ranges(), [(0x100, 0x100)]);
++            viewed.set_seen(66, None);
++            assert!(ranges().is_empty());
++        }
++        crate::shadow::unregister(at as usize, at);
++    }
++
+     /// A copy's hull is its live ranges' first start to last end, kept as
+     /// slots come and go; a copy no slot views any more has none.
+     #[test]
+diff --git a/crates/victory-gpu/src/descriptor/host.rs b/crates/victory-gpu/src/descriptor/host.rs
+index 07319c6..ec1318a 100644
+--- a/crates/victory-gpu/src/descriptor/host.rs
++++ b/crates/victory-gpu/src/descriptor/host.rs
+@@ -298,7 +298,11 @@ impl HostHeap {
+             strides,
+             marks,
+             addresses: std::sync::OnceLock::new(),
+-            viewed: Default::default(),
++            viewed: std::sync::Arc::new(if sampler {
++                crate::bindless::Viewed::default()
++            } else {
++                crate::bindless::Viewed::for_heap(count)
++            }),
+             widened: Default::default(),
+         };
+         if !sampler {

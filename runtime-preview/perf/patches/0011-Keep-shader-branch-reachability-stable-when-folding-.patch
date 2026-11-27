@@ -1,0 +1,86 @@
+From 59a1fe8b4a64cbb59ec502ee112ec51e9a6ca32b Mon Sep 17 00:00:00 2001
+From: Pavel <pavel.rogojin@icloud.com>
+Date: Fri, 27 Nov 2026 12:03:28 +0100
+Subject: [PATCH] Keep shader branch reachability stable when folding constants
+
+---
+ .../src/emit/bitcode/integer_fold.rs           | 18 +++++++-----------
+ docs/macos.md                                  |  2 +-
+ 2 files changed, 8 insertions(+), 12 deletions(-)
+
+diff --git a/crates/victory-shader/src/emit/bitcode/integer_fold.rs b/crates/victory-shader/src/emit/bitcode/integer_fold.rs
+index 06d4fa8..253a92a 100644
+--- a/crates/victory-shader/src/emit/bitcode/integer_fold.rs
++++ b/crates/victory-shader/src/emit/bitcode/integer_fold.rs
+@@ -1,4 +1,4 @@
+-use super::{Bin, MdDef, Module, Op, Term, TypeDef, V, pred};
++use super::{Bin, MdDef, Module, Op, TypeDef, V, pred};
+ 
+ impl Module {
+     pub(crate) fn fold_integer_constants(&mut self) {
+@@ -18,6 +18,7 @@ impl Module {
+         if constants.iter().all(Option::is_none) {
+             return;
+         }
++        // Keep branch edges because some shader feature flags are set before emission.
+         let replace = |v: &mut V| *v = substitute(&constants, *v);
+         for inst in &mut self.insts {
+             match &mut inst.op {
+@@ -39,11 +40,6 @@ impl Module {
+                 }
+             }
+         }
+-        for block in &mut self.blocks {
+-            if let Some(Term::CondBr(v, _, _)) = &mut block.term {
+-                replace(v);
+-            }
+-        }
+         for md in &mut self.mds {
+             if let MdDef::Value(_, v) = md {
+                 replace(v);
+@@ -122,10 +118,11 @@ fn signed(bits: u32, value: u64) -> i64 {
+ 
+ #[cfg(test)]
+ mod tests {
++    use super::super::Term;
+     use super::*;
+ 
+     #[test]
+-    fn integer_folding_uses_existing_branch_and_liveness_plan() {
++    fn integer_folding_preserves_branches_and_updates_phi_values() {
+         let mut module = Module::default();
+         let void = module.void();
+         let int = module.int(32);
+@@ -151,16 +148,15 @@ mod tests {
+         module.set_phi(selected, vec![(one, yes), (two, no)]);
+         module.call(join, sink, vec![selected]);
+         module.terminate(join, Term::Ret);
+-        let before = module.write();
+-        assert_eq!(module.written_shape().2, 1);
++        let before = module.written_shape();
++        assert_eq!(before.2, 1);
+         module.fold_integer_constants();
+-        assert_eq!(module.written_shape().2, 0);
++        assert_eq!(module.written_shape(), (before.0, before.1 - 1, before.2));
+         let V::Inst(i) = selected else { unreachable!() };
+         let Op::Phi(values) = &module.insts[i as usize].op else {
+             unreachable!()
+         };
+         assert_eq!(module.int_value(values[0].0), Some(1));
+-        assert!(module.write().len() < before.len());
+     }
+ 
+     #[test]
+diff --git a/docs/macos.md b/docs/macos.md
+index 69e2a36..e9cc346 100644
+--- a/docs/macos.md
++++ b/docs/macos.md
+@@ -347,7 +347,7 @@ None of these changes the default. Each is read from the environment when the ga
+ | `VICTORY_WINDOW_SECONDARY=1` | Opens the game window on the only non-primary display. |
+ | `VICTORY_WINDOW_SECONDARY=x,y` | Opens the game window on the display that holds the desktop point `x,y`, for layouts with more than one extra display (a Sidecar iPad beside two monitors, say). |
+ | `VICTORY_FRAME_WAITS=1` | Logs title pacing, queue waits and presentation wall time in release and diagnostics builds. |
+-| `VICTORY_SHADER_OPT=2` | Folds defined integer constant arithmetic and comparisons before DXIL emission. Off by default and keyed separately for shader and pipeline caches. |
++| `VICTORY_SHADER_OPT=2` | Folds defined integer constant arithmetic and comparisons before DXIL emission while preserving branches. Off by default and keyed separately for shader and pipeline caches. |
+ | `VICTORY_HALVES_F64_COUNT=1` | Enables exact FP64 counts of 1.0 across two host waves in proven exchange blocks. Requires halves exchange and uses its own shader and pipeline cache keys. |
+ 
+ The frame wait report prints after a completed PresentX call at intervals of at least five seconds. Times are milliseconds per completed PresentX, including calls that did not display a picture. Queue pumping, submission settling and host presentation are phases inside PresentX. Frame sleeps and fence waits can run on other threads and overlap.

@@ -78,6 +78,19 @@ tools/macos/play-main-mac.sh "/path/to/the/game/executable" --console series-s
 
 Known issues: after 4 to 5 minutes, swap grows again by about 2 GB and some minutes drop to 1 fps. The opening credits show a flat green panel where a video should play. `VICTORY_COPY_FAST` and `VICTORY_ALIAS_BUFFERS` are off by default because both still crash.
 
+The performance recipe also includes pixel DPP8 translation when every read stays in its destination quad. The following switches are opt-in.
+
+| Setting | Purpose |
+| --- | --- |
+| `VICTORY_KEYS_FILE` | Reads appended keyboard commands from an existing file at a Wine-visible path. A line can tap a key, hold it or schedule a delayed hold. `release` cancels queued holds. |
+| `VICTORY_SPANS_QUICK=1` | Avoids taking the descriptor census lock when the slot being cleared is already empty. |
+| `VICTORY_DETILE_ROWS=1` | Uses two workers to detile eligible large 2D uploads by row bands, retaining the serial path for other layouts. |
+| `VICTORY_FRAME_WAITS=1` | Reports time spent on title pacing, queue and fence waits, and presentation. |
+| `VICTORY_SHADER_OPT=2` | Folds defined integer constant arithmetic and comparisons before emitting DXIL. |
+| `VICTORY_HALVES_F64_COUNT=1` | With `VICTORY_HALVES_EXCHANGE=1`, counts exact `1.0` terms across synchronized wave halves. |
+
+Create the input file before launch. Append `W 3` on its own line to hold W for three seconds, or `J 2 4` to hold J for two seconds after a four-second delay. Each command is relative to the time the runtime reads the line. Shader folding and cross-half counting use separate shader and pipeline cache identities.
+
 ## Wine startup
 
 Supply Rosetta and a compatible Wine installation with Apple D3DMetal. For setup details, see [VIctory-macOS](https://github.com/pragyaangaur/VIctory-macOS/blob/23ff1f7540952533b283d996a4f3f6710a6f6e85/README.md) and Apple's [Game Porting Toolkit](https://developer.apple.com/games/game-porting-toolkit/).

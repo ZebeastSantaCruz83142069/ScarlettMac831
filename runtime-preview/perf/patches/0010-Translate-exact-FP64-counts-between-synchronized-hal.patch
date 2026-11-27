@@ -1,0 +1,224 @@
+From bbdd99e81203aa3a0b92532bef286ab26d35a154 Mon Sep 17 00:00:00 2001
+From: Pavel <pavel.rogojin@icloud.com>
+Date: Fri, 27 Nov 2026 12:00:07 +0100
+Subject: [PATCH 10/10] Translate exact FP64 counts between synchronized
+ half-waves
+
+---
+ crates/victory-gpu/src/shader_cache.rs        |  8 +++
+ crates/victory-shader/src/emit/f64_tests.rs   | 71 +++++++++++++++++--
+ .../victory-shader/src/emit/halves_tests.rs   |  2 +-
+ .../victory-shader/src/emit/lower/f64_sum.rs  | 16 ++++-
+ crates/victory-shader/src/emit/mod.rs         |  6 ++
+ docs/macos.md                                 |  1 +
+ 6 files changed, 97 insertions(+), 7 deletions(-)
+
+diff --git a/crates/victory-gpu/src/shader_cache.rs b/crates/victory-gpu/src/shader_cache.rs
+index b06fd78..8d9c730 100644
+--- a/crates/victory-gpu/src/shader_cache.rs
++++ b/crates/victory-gpu/src/shader_cache.rs
+@@ -378,6 +378,14 @@ pub(crate) fn translation_build(options: victory_shader::emit::Options) -> &'sta
+     } else {
+         key
+     };
++    let key = if options.halves_exchange && victory_shader::emit::f64_count_exchange() {
++        let mut h = blake3::Hasher::new();
++        h.update(&key);
++        h.update(b"halves f64 count");
++        *h.finalize().as_bytes()
++    } else {
++        key
++    };
+     if key == *build {
+         return build;
+     }
+diff --git a/crates/victory-shader/src/emit/f64_tests.rs b/crates/victory-shader/src/emit/f64_tests.rs
+index 08f7582..6f9624e 100644
+--- a/crates/victory-shader/src/emit/f64_tests.rs
++++ b/crates/victory-shader/src/emit/f64_tests.rs
+@@ -431,6 +431,7 @@ fn lowered_wave64(
+     words: &[u32],
+     host_wave32: bool,
+     local: bool,
++    exchange: bool,
+ ) -> Result<lower::Lowered, crate::ShaderError> {
+     let native = NativeProgram {
+         stage: HwStage::Cs,
+@@ -484,7 +485,7 @@ fn lowered_wave64(
+             reads: local,
+             lds: false,
+         },
+-        mac: Default::default(),
++        mac: lower::Mac { exchange, ..Default::default() },
+         host_wave32,
+     })
+ }
+@@ -535,28 +536,88 @@ fn the_count_of_lanes_is_the_expansion_its_comments_say() {
+ #[test]
+ fn a_whole_wave_sum_of_the_64_bit_float_one_translates() {
+     let words = count_of_lanes(0x3FF0_0000);
+-    let whole = lowered_wave64(&words, false, false).expect("one wave64");
++    let whole = lowered_wave64(&words, false, false, false).expect("one wave64");
+     assert!(whole.wave_ops);
+     assert_eq!(whole.wave_size, Some(64));
+     assert_eq!(whole.stored_constants, [None]);
+-    let refused = lowered_wave64(&words, true, false).map(drop).unwrap_err();
++    let refused = lowered_wave64(&words, true, false, false).map(drop).unwrap_err();
+     assert!(
+         refused
+             .to_string()
+             .contains("a wave reduction over both 32-lane halves"),
+         "{refused}"
+     );
+-    let halves = lowered_wave64(&words, true, true).expect("in halves");
++    let halves = lowered_wave64(&words, true, true, false).expect("in halves");
+     assert!(halves.wave_ops);
+     assert_eq!(halves.wave_size, Some(32));
+ }
+ 
++#[test]
++fn an_exact_f64_lane_count_can_exchange_the_integer_totals() {
++    const SUBTEST: &str = "VICTORY_TEST_F64_EXCHANGE";
++    match std::env::var(SUBTEST).as_deref() {
++        Ok("1") => {
++            let result = lowered_wave64(&count_of_lanes(0x3FF0_0000), true, false, true)
++                .expect("an exact integer count across both waves");
++            assert_eq!(result.wave_size, Some(32));
++            assert_eq!(result.stored_constants, [None]);
++            assert_eq!(result.exchanges, 1);
++            assert!(result.barriers > 0);
++            assert!(lowered_wave64(&count_of_lanes(0x4000_0000), true, false, true).is_err());
++            assert!(lowered_wave64(&count_of_lanes(0x3FF0_0000), true, false, false).is_err());
++        }
++        Ok("0") => {
++            assert!(lowered_wave64(&count_of_lanes(0x3FF0_0000), true, false, true).is_err());
++        }
++        _ => {
++            for on in ["0", "1"] {
++                let child = std::process::Command::new(std::env::current_exe().unwrap())
++                    .args(["--exact", "emit::f64_tests::an_exact_f64_lane_count_can_exchange_the_integer_totals"])
++                    .env(SUBTEST, on)
++                    .env("VICTORY_HALVES_F64_COUNT", on)
++                    .output()
++                    .unwrap();
++                assert!(child.status.success(), "{}", String::from_utf8_lossy(&child.stdout));
++            }
++        }
++    }
++}
++
++#[cfg(windows)]
++#[test]
++#[ignore = "requires a 32-lane hardware adapter and VICTORY_HALVES_F64_COUNT=1"]
++fn exact_f64_count_matches_console_on_32_lane_gpu() {
++    use super::host::{Dispatch, Host, Root, Stride, View};
++    let lowered = lowered_wave64(&count_of_lanes(0x3FF0_0000), true, false, true).unwrap();
++    let shader = super::halves_tests::shader(lowered);
++    let (adapter, host) = Host::each_hardware()
++        .into_iter()
++        .find(|(_, host)| matches!(host.wave32(), Ok(true)))
++        .expect("a 32-lane hardware adapter");
++    let (root, pso) = host.compute_pipeline(&shader).unwrap();
++    let views = [
++        View::Texture(1, 1, &[[0.0; 4]]),
++        View::Buffer { data: &[0; 4], stride: Stride::Structured(16) },
++        View::RawUav(64 * 8),
++    ];
++    let ud = vec![0; shader.user_data_dwords().max(1) as usize];
++    let output = host.dispatch(&root, &pso, &Dispatch {
++        roots: vec![(0, Root::Constants(ud))],
++        views: &views,
++        samplers: &[],
++        groups: [1, 1, 1],
++    }).unwrap();
++    let values: Vec<_> = output[0].chunks_exact(8).map(|row| row[0]).collect();
++    assert_eq!(values, [34f32.to_bits(); 64], "{adapter}");
++    eprintln!("{adapter}: all 64 lanes returned 34.0");
++}
++
+ /// Any other summand would need 64-bit float additions, which the host
+ /// does not have: refused, by name.
+ #[test]
+ fn a_whole_wave_sum_of_other_64_bit_floats_is_refused() {
+     for high in [0x3FF8_0000, 0x4000_0000, 0xBFF0_0000, 0] {
+-        let why = lowered_wave64(&count_of_lanes(high), false, false)
++        let why = lowered_wave64(&count_of_lanes(high), false, false, false)
+             .map(drop)
+             .unwrap_err()
+             .to_string();
+diff --git a/crates/victory-shader/src/emit/halves_tests.rs b/crates/victory-shader/src/emit/halves_tests.rs
+index 06f409a..aaccdfe 100644
+--- a/crates/victory-shader/src/emit/halves_tests.rs
++++ b/crates/victory-shader/src/emit/halves_tests.rs
+@@ -164,7 +164,7 @@ fn lowered_with(
+     })
+ }
+ 
+-fn shader(l: lower::Lowered) -> super::HostShader {
++pub(super) fn shader(l: lower::Lowered) -> super::HostShader {
+     super::HostShader {
+         stage: HwStage::Cs,
+         dxil: l.dxil,
+diff --git a/crates/victory-shader/src/emit/lower/f64_sum.rs b/crates/victory-shader/src/emit/lower/f64_sum.rs
+index 57776ca..db39e4c 100644
+--- a/crates/victory-shader/src/emit/lower/f64_sum.rs
++++ b/crates/victory-shader/src/emit/lower/f64_sum.rs
+@@ -63,7 +63,14 @@ impl Lower<'_> {
+         if self.mask_data == MaskData::None {
+             return Err("a wave reduction in a mesh shader");
+         }
+-        self.same_half("a wave reduction over both 32-lane halves (wave64 on a 32-lane host)")?;
++        let enabled = self.halves
++            && !self.one_host_wave()
++            && self.x.mac.exchange
++            && super::super::f64_count_exchange();
++        let across = enabled && (!high || self.exchange_halves_in(self.cur_ir));
++        if !across {
++            self.same_half("a wave reduction over both 32-lane halves (wave64 on a 32-lane host)")?;
++        }
+         let (lo, hi) = (self.i32_of(lo)?, self.i32_of(hi)?);
+         if self.s.m.int_value(lo) != Some(0) || self.s.m.int_value(hi) != Some(ONE_HIGH.into()) {
+             return Err("a whole-wave sum of 64-bit floats other than of the constant 1.0");
+@@ -93,6 +100,13 @@ impl Lower<'_> {
+             119,
+             &[x, sum, unsigned],
+         );
++        let n = if across {
++            use super::super::wave::Op;
++            self.exchanged_reduction(Op::AddU, n, None, 0)
++                .ok_or("an integer FP64 lane count")?
++        } else {
++            n
++        };
+         Ok(count_f64_high(&mut self.s.m, c, n))
+     }
+ }
+diff --git a/crates/victory-shader/src/emit/mod.rs b/crates/victory-shader/src/emit/mod.rs
+index 0d4fc84..df6d56e 100644
+--- a/crates/victory-shader/src/emit/mod.rs
++++ b/crates/victory-shader/src/emit/mod.rs
+@@ -330,6 +330,12 @@ pub use shader::{
+     VIEW_WRITES_BYTES,
+ };
+ 
++/// Whether the sum of FP64 ones may use the exact integer exchange across host waves.
++pub fn f64_count_exchange() -> bool {
++    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
++    *ON.get_or_init(|| std::env::var_os("VICTORY_HALVES_F64_COUNT").is_some_and(|v| v == "1"))
++}
++
+ /// The loop limit without an override: 2^14.
+ pub const DEFAULT_LOOP_LIMIT: u32 = lower::LOOP_LIMIT;
+ 
+diff --git a/docs/macos.md b/docs/macos.md
+index c950e32..69e2a36 100644
+--- a/docs/macos.md
++++ b/docs/macos.md
+@@ -348,6 +348,7 @@ None of these changes the default. Each is read from the environment when the ga
+ | `VICTORY_WINDOW_SECONDARY=x,y` | Opens the game window on the display that holds the desktop point `x,y`, for layouts with more than one extra display (a Sidecar iPad beside two monitors, say). |
+ | `VICTORY_FRAME_WAITS=1` | Logs title pacing, queue waits and presentation wall time in release and diagnostics builds. |
+ | `VICTORY_SHADER_OPT=2` | Folds defined integer constant arithmetic and comparisons before DXIL emission. Off by default and keyed separately for shader and pipeline caches. |
++| `VICTORY_HALVES_F64_COUNT=1` | Enables exact FP64 counts of 1.0 across two host waves in proven exchange blocks. Requires halves exchange and uses its own shader and pipeline cache keys. |
+ 
+ The frame wait report prints after a completed PresentX call at intervals of at least five seconds. Times are milliseconds per completed PresentX, including calls that did not display a picture. Queue pumping, submission settling and host presentation are phases inside PresentX. Frame sleeps and fence waits can run on other threads and overlap.
+ 

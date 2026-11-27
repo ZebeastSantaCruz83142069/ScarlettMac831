@@ -1,0 +1,328 @@
+From d242003ae4984edda7987a5802ac40b09cc990a7 Mon Sep 17 00:00:00 2001
+From: Pavel <pavel.rogojin@icloud.com>
+Date: Fri, 27 Nov 2026 11:53:55 +0100
+Subject: [PATCH 06/10] Allow large tiled texture uploads to detile in row
+ bands
+
+---
+ crates/victory-formats/src/texture.rs |  79 +++++++++++++---
+ crates/victory-gpu/src/texture.rs     | 128 +++++++++++++++++++++++++-
+ 2 files changed, 192 insertions(+), 15 deletions(-)
+
+diff --git a/crates/victory-formats/src/texture.rs b/crates/victory-formats/src/texture.rs
+index d46024a..7f416a1 100644
+--- a/crates/victory-formats/src/texture.rs
++++ b/crates/victory-formats/src/texture.rs
+@@ -623,9 +623,23 @@ impl Layout {
+             slice,
+             row_pitch,
+             depth_pitch,
++            None,
+         )
+     }
+ 
++    /// Detiles rows in a one-slice subresource into a buffer starting at the first row.
++    pub fn detile_rows(
++        &self,
++        tiled: &[u8],
++        mip: u32,
++        slice: u32,
++        linear: &mut [u8],
++        row_pitch: usize,
++        rows: std::ops::Range<u32>,
++    ) -> Result<(), Error> {
++        self.walk(Buffers::Detile { tiled, linear }, mip, slice, row_pitch, 0, Some(rows))
++    }
++
+     /// The reverse of [`Layout::detile`]: linear rows into tiled memory.
+     pub fn tile(
+         &self,
+@@ -642,6 +656,7 @@ impl Layout {
+             slice,
+             row_pitch,
+             depth_pitch,
++            None,
+         )
+     }
+ 
+@@ -653,9 +668,14 @@ impl Layout {
+         slice: u32,
+         row_pitch: usize,
+         depth_pitch: usize,
++        band: Option<std::ops::Range<u32>>,
+     ) -> Result<(), Error> {
+         let m = self.mips.get(mip as usize).ok_or(Error::Invalid)?;
+         let depth = m.depth;
++        let rows = band.clone().unwrap_or(0..m.height);
++        if band.is_some() && (depth != 1 || rows.is_empty() || rows.end > m.height) {
++            return Err(Error::Invalid);
++        }
+         let first = if self.desc.dimension == Dimension::Tex3d {
+             if slice != 0 {
+                 return Err(Error::Invalid);
+@@ -672,7 +692,7 @@ impl Layout {
+         }
+         let n = self.desc.element_bytes as usize;
+         let bytes = m.width as usize * n;
+-        let slice_bytes = (m.height as usize - 1)
++        let slice_bytes = (rows.len() - 1)
+             .checked_mul(row_pitch)
+             .and_then(|offset| offset.checked_add(bytes))
+             .ok_or(Error::TooSmall)?;
+@@ -696,10 +716,10 @@ impl Layout {
+         if self.desc.swizzle == Swizzle::LINEAR {
+             for z in 0..depth {
+                 let base = (u64::from(first + z) * self.slice_size + m.offset) as usize;
+-                for y in 0..m.height as usize {
++                for y in rows.start as usize..rows.end as usize {
+                     copy.span(
+                         base + y * m.pitch as usize * n,
+-                        z as usize * depth_pitch + y * row_pitch,
++                        z as usize * depth_pitch + (y - rows.start as usize) * row_pitch,
+                         bytes,
+                     );
+                 }
+@@ -716,10 +736,10 @@ impl Layout {
+             .take_while(|&(x, &offset)| offset as usize == x * n)
+             .count();
+         match run * n {
+-            4 => self.walk_runs::<4>(m, first, row_pitch, depth_pitch, &mut copy),
+-            8 => self.walk_runs::<8>(m, first, row_pitch, depth_pitch, &mut copy),
+-            16 => self.walk_runs::<16>(m, first, row_pitch, depth_pitch, &mut copy),
+-            32 => self.walk_runs::<32>(m, first, row_pitch, depth_pitch, &mut copy),
++            4 => self.walk_runs::<4>(m, first, row_pitch, depth_pitch, rows, &mut copy),
++            8 => self.walk_runs::<8>(m, first, row_pitch, depth_pitch, rows, &mut copy),
++            16 => self.walk_runs::<16>(m, first, row_pitch, depth_pitch, rows, &mut copy),
++            32 => self.walk_runs::<32>(m, first, row_pitch, depth_pitch, rows, &mut copy),
+             _ => unreachable!("GFX10 contiguous run width"),
+         }
+         Ok(())
+@@ -731,6 +751,7 @@ impl Layout {
+         first: u32,
+         row_pitch: usize,
+         depth_pitch: usize,
++        band: std::ops::Range<u32>,
+         copy: &mut Buffers<'_>,
+     ) {
+         let n = self.desc.element_bytes as usize;
+@@ -744,20 +765,20 @@ impl Layout {
+         let last = (end < bytes).then(|| self.column(m, (end / n) as u32) as usize);
+         // Pair short runs to keep writes to nearby tiled addresses together.
+         // Wide runs already transfer 32 bytes per visit.
+-        let rows = if N < 32 { 2 } else { 1 };
++        let rows = if N < 32 && band.start.is_multiple_of(2) { 2 } else { 1 };
+         let bd = self.block[2];
+         for slab in (0..m.depth).step_by(bd as usize) {
+             let (slice, _) = self.split(first + slab);
+             let base = u64::from(slice) * self.slice_size + m.offset;
+-            for y in (0..m.height).step_by(rows) {
++            for y in band.clone().step_by(rows) {
+                 // Tail origins and row pairs both start on even y. The low y
+                 // bit gives the distance to the second row in this block.
+-                let second = (rows == 2 && y + 1 < m.height).then(|| self.pattern[1][1] as usize);
++                let second = (rows == 2 && y + 1 < band.end).then(|| self.pattern[1][1] as usize);
+                 let row = base + self.row(m, y, 0);
+                 // Depth slices in this slab share the same physical blocks.
+                 for inner in 0..bd.min(m.depth - slab) {
+                     let t = row as usize + self.pattern[2][inner as usize] as usize;
+-                    let l = (slab + inner) as usize * depth_pitch + y as usize * row_pitch;
++                    let l = (slab + inner) as usize * depth_pitch + (y - band.start) as usize * row_pitch;
+                     copy.runs::<N>(&columns, t, l, row_pitch, second);
+                     if let Some(col) = last {
+                         copy.span(t + col, l + end, bytes - end);
+@@ -1044,6 +1065,42 @@ mod tests {
+     /// equal reports nothing, a differing one the runs of its differing
+     /// bytes at their offsets in the memory, and `kept` ends the
+     /// memory's; the walk behind the fast path answers the same.
++    #[test]
++    fn detile_bands_match_full_rows_and_preserve_padding() {
++        for swizzle in [Swizzle::LINEAR, Swizzle(10)] {
++            let layout = Layout::new(&Desc {
++                dimension: Dimension::Tex2d,
++                width: 257,
++                height: 131,
++                depth: 2,
++                mips: 4,
++                samples: 1,
++                element_bytes: 4,
++                block: 1,
++                swizzle,
++            }).unwrap();
++            let tiled: Vec<_> = (0..layout.size).map(|byte| (byte ^ (byte >> 9)) as u8).collect();
++            for (mip, slice) in [(0, 0), (1, 1), (3, 1)] {
++                let m = &layout.mips[mip as usize];
++                let pitch = (m.width as usize * 4).next_multiple_of(256);
++                let len = (m.height as usize - 1) * pitch + m.width as usize * 4;
++                let mut expected = vec![0xa5; len];
++                let mut banded = expected.clone();
++                layout.detile(&tiled, mip, slice, &mut expected, pitch, len).unwrap();
++                let split = 3.min(m.height - 1);
++                let (top, bottom) = banded.split_at_mut(split as usize * pitch);
++                layout.detile_rows(&tiled, mip, slice, top, pitch, 0..split).unwrap();
++                layout.detile_rows(&tiled, mip, slice, bottom, pitch, split..m.height).unwrap();
++                assert_eq!(banded, expected);
++                assert_eq!(
++                    layout.detile_rows(&tiled, mip, slice, &mut banded, pitch, 1..m.height + 1),
++                    Err(Error::Invalid),
++                );
++                assert_eq!(banded, expected);
++            }
++        }
++    }
++
+     #[test]
+     fn changed_runs_report_and_keep_the_differing_bytes() {
+         let memory = [7u8; 100];
+diff --git a/crates/victory-gpu/src/texture.rs b/crates/victory-gpu/src/texture.rs
+index 4867d19..1d11e9b 100644
+--- a/crates/victory-gpu/src/texture.rs
++++ b/crates/victory-gpu/src/texture.rs
+@@ -641,6 +641,89 @@ pub(crate) fn refresh_all(work: &[(Arc<Staging>, Arc<crate::resource::HostTextur
+     out
+ }
+ 
++const DETILE_BAND_MIN: usize = 2 * 1024 * 1024;
++
++fn row_workers() -> Option<&'static rayon::ThreadPool> {
++    // A refresh holds its staging lock. These workers run only detile jobs,
++    // and an existing Rayon worker must never yield into another refresh.
++    if rayon::current_thread_index().is_some() {
++        return None;
++    }
++    static WORKERS: OnceLock<Option<rayon::ThreadPool>> = OnceLock::new();
++    WORKERS.get_or_init(|| {
++        if !crate::switch::on("VICTORY_DETILE_ROWS") {
++            return None;
++        }
++        match rayon::ThreadPoolBuilder::new()
++            .num_threads(2)
++            .thread_name(|i| format!("detile rows {i}"))
++            .build()
++        {
++            Ok(pool) => {
++                tracing::info!("VICTORY_DETILE_ROWS=1: large tiled 2D uploads can detile in bands");
++                Some(pool)
++            }
++            Err(error) => {
++                tracing::warn!(%error, "could not start the row detile workers");
++                None
++            }
++        }
++    }).as_ref()
++}
++
++fn band_height(
++    layout: &victory_formats::texture::Layout,
++    mip: u32,
++    rows: u32,
++    depth: u32,
++    len: usize,
++) -> Option<u32> {
++    use victory_formats::texture::{Dimension, Swizzle};
++    if depth != 1 || rows < 4 || len < DETILE_BAND_MIN
++        || layout.desc.dimension != Dimension::Tex2d
++        || layout.desc.samples != 1
++        || layout.desc.swizzle == Swizzle::LINEAR
++        || !layout.mips.get(mip as usize).is_some_and(|m| m.height == rows && m.depth == 1)
++    {
++        return None;
++    }
++    Some(rows.div_ceil(2).next_multiple_of(2))
++}
++
++#[allow(clippy::too_many_arguments)]
++fn detile_upload(
++    layout: &victory_formats::texture::Layout,
++    tiled: &[u8],
++    (mip, slice): (u32, u32),
++    linear: &mut [u8],
++    pitch: usize,
++    rows: u32,
++    depth: u32,
++    pool: Option<&rayon::ThreadPool>,
++) -> Result<(), victory_formats::texture::Error> {
++    if let Some(pool) = pool
++        && let Some(band) = band_height(layout, mip, rows, depth, linear.len())
++        && let Some(bytes) = pitch.checked_mul(band as usize).filter(|&bytes| bytes != 0)
++    {
++        use victory_formats::texture::Error;
++        let row_bytes = layout.mips[mip as usize].width as usize * layout.desc.element_bytes as usize;
++        let need = (rows as usize - 1)
++            .checked_mul(pitch)
++            .and_then(|offset| offset.checked_add(row_bytes))
++            .ok_or(Error::TooSmall)?;
++        if linear.len() < need || pitch < row_bytes {
++            return Err(Error::TooSmall);
++        }
++        return pool.install(|| {
++            linear[..need].par_chunks_mut(bytes).enumerate().try_for_each(|(index, chunk)| {
++                let first = index as u32 * band;
++                layout.detile_rows(tiled, mip, slice, chunk, pitch, first..rows.min(first + band))
++            })
++        });
++    }
++    layout.detile(tiled, mip, slice, linear, pitch, pitch * rows as usize)
++}
++
+ impl Staging {
+     /// Whether its memory may have changed since it was last detiled (an
+     /// untracked texture always may).
+@@ -879,10 +962,9 @@ impl Staging {
+             // keeping the slice strictly inside the mapped staging buffer even when
+             // GetCopyableFootprints does not pad the final row of the last subresource.
+             let linear = unsafe { std::slice::from_raw_parts_mut(data.add(footprint.Offset as usize), len) };
+-            if let Err(e) =
+-                self.layout
+-                    .detile(tiled, mip, slice, linear, pitch, pitch * rows as usize)
+-            {
++            let pool = (subresources.len() == 1 && len >= DETILE_BAND_MIN)
++                .then(row_workers).flatten();
++            if let Err(e) = detile_upload(&self.layout, tiled, (mip, slice), linear, pitch, rows, f.Depth, pool) {
+                 tracing::warn!(?e, mip, slice, "texture not detiled");
+                 return None;
+             }
+@@ -1241,6 +1323,44 @@ fn skip_same_frame(
+ mod tests {
+     use super::*;
+ 
++    #[test]
++    fn staged_row_bands_match_the_serial_upload() {
++        use victory_formats::texture::{Desc, Dimension, Layout, Swizzle};
++        let pool = rayon::ThreadPoolBuilder::new().num_threads(2).build().unwrap();
++        let layout = Layout::new(&Desc {
++            dimension: Dimension::Tex2d,
++            width: 2049,
++            height: 2051,
++            depth: 2,
++            mips: 2,
++            element_bytes: 16,
++            block: 4,
++            samples: 1,
++            swizzle: Swizzle::SW_64KB_D,
++        }).unwrap();
++        let tiled: Vec<_> = (0..layout.size).map(|i| (i ^ (i >> 8)) as u8).collect();
++        let mip = &layout.mips[0];
++        let rows = mip.height;
++        let row_bytes = mip.width as usize * 16;
++        let pitch = row_bytes.next_multiple_of(256);
++        let len = (rows as usize - 1) * pitch + row_bytes;
++        let mut serial = vec![0x59; len];
++        let mut parallel = serial.clone();
++        layout.detile(&tiled, 0, 1, &mut serial, pitch, pitch * rows as usize).unwrap();
++        assert!(band_height(&layout, 0, rows, 1, len).is_some());
++        detile_upload(&layout, &tiled, (0, 1), &mut parallel, pitch, rows, 1, Some(&pool)).unwrap();
++        assert_eq!(parallel, serial);
++        let truncated = len - 1;
++        parallel.fill(0x59);
++        assert_eq!(
++            detile_upload(&layout, &tiled, (0, 1), &mut parallel[..truncated], pitch, rows, 1, Some(&pool)),
++            Err(victory_formats::texture::Error::TooSmall),
++        );
++        assert!(parallel.iter().all(|&byte| byte == 0x59));
++        assert_eq!(band_height(&layout, 0, rows, 2, len), None);
++        assert_eq!(band_height(&layout, 0, rows + 1, 1, len), None);
++    }
++
+     #[test]
+     fn texture_scratch_reuses_growing_buffers_within_the_retained_capacity() {
+         let mib = 1 << 20;

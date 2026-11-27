@@ -1,0 +1,388 @@
+From ce22c3cf6819d63a7874aaf5e5663bb3b1d5a40c Mon Sep 17 00:00:00 2001
+From: Pavel <pavel.rogojin@icloud.com>
+Date: Fri, 27 Nov 2026 11:59:08 +0100
+Subject: [PATCH 09/10] Offer width-correct integer constant folding in DXIL
+
+---
+ crates/victory-gpu/src/shader_cache.rs        |  30 ++-
+ crates/victory-shader/src/emit/bitcode.rs     |   2 +
+ .../src/emit/bitcode/integer_fold.rs          | 219 ++++++++++++++++++
+ crates/victory-shader/src/emit/mod.rs         |  32 +++
+ crates/victory-shader/src/emit/shader.rs      |   3 +
+ docs/macos.md                                 |   1 +
+ 6 files changed, 278 insertions(+), 9 deletions(-)
+ create mode 100644 crates/victory-shader/src/emit/bitcode/integer_fold.rs
+
+diff --git a/crates/victory-gpu/src/shader_cache.rs b/crates/victory-gpu/src/shader_cache.rs
+index e4b195e..b06fd78 100644
+--- a/crates/victory-gpu/src/shader_cache.rs
++++ b/crates/victory-gpu/src/shader_cache.rs
+@@ -65,7 +65,13 @@ fn build() -> &'static [u8; 32] {
+                 "VICTORY_SHADER_LOOP_LIMIT: translated loops stop sooner"
+             );
+         }
+-        key(victory_shader::SOURCE_HASH, ENCODING, limit, host_wave32())
++        key(
++            victory_shader::SOURCE_HASH,
++            ENCODING,
++            limit,
++            host_wave32(),
++            victory_shader::emit::shader_opt(),
++        )
+     })
+ }
+ 
+@@ -79,12 +85,16 @@ fn host_wave32() -> bool {
+ /// This file, whose `encode` and `decode` define the entries.
+ const ENCODING: &[u8] = include_bytes!("shader_cache.rs");
+ 
+-fn key(translator: &str, encoding: &[u8], limit: u32, wave32: bool) -> [u8; 32] {
++fn key(translator: &str, encoding: &[u8], limit: u32, wave32: bool, passes: u32) -> [u8; 32] {
+     let mut h = blake3::Hasher::new();
+     h.update(translator.as_bytes());
+     h.update(blake3::hash(encoding).as_bytes());
+     h.update(&limit.to_le_bytes());
+     h.update(&[u8::from(wave32)]);
++    if passes != 0 {
++        h.update(b"shader cleanup");
++        h.update(&passes.to_le_bytes());
++    }
+     *h.finalize().as_bytes()
+ }
+ 
+@@ -844,19 +854,21 @@ mod tests {
+     /// another key, so no entry written before it is read.
+     #[test]
+     fn the_key_covers_translator_encoding_and_settings() {
+-        let k = key("0123456789abcdef", b"encoding", 1 << 20, false);
+-        assert_eq!(k, key("0123456789abcdef", b"encoding", 1 << 20, false));
+-        assert_ne!(k, key("0123456789abcdee", b"encoding", 1 << 20, false));
+-        assert_ne!(k, key("0123456789abcdef", b"encoding.", 1 << 20, false));
+-        assert_ne!(k, key("0123456789abcdef", b"encoding", 1 << 19, false));
+-        assert_ne!(k, key("0123456789abcdef", b"encoding", 1 << 20, true));
++        let k = key("0123456789abcdef", b"encoding", 1 << 20, false, 0);
++        assert_eq!(k, key("0123456789abcdef", b"encoding", 1 << 20, false, 0));
++        assert_ne!(k, key("0123456789abcdee", b"encoding", 1 << 20, false, 0));
++        assert_ne!(k, key("0123456789abcdef", b"encoding.", 1 << 20, false, 0));
++        assert_ne!(k, key("0123456789abcdef", b"encoding", 1 << 19, false, 0));
++        assert_ne!(k, key("0123456789abcdef", b"encoding", 1 << 20, true, 0));
++        assert_ne!(k, key("0123456789abcdef", b"encoding", 1 << 20, false, 2));
+         assert_eq!(
+             *build(),
+             key(
+                 victory_shader::SOURCE_HASH,
+                 ENCODING,
+                 victory_shader::emit::loop_limit(),
+-                host_wave32()
++                host_wave32(),
++                victory_shader::emit::shader_opt(),
+             )
+         );
+         // Half-local reads (`VICTORY_HALVES_LOCAL=1`) and shared LDS in
+diff --git a/crates/victory-shader/src/emit/bitcode.rs b/crates/victory-shader/src/emit/bitcode.rs
+index 8018b57..094a802 100644
+--- a/crates/victory-shader/src/emit/bitcode.rs
++++ b/crates/victory-shader/src/emit/bitcode.rs
+@@ -9,6 +9,8 @@ use std::collections::HashMap;
+ 
+ use crate::structure::Map;
+ 
++mod integer_fold;
++
+ #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+ pub(crate) struct Ty(u32);
+ 
+diff --git a/crates/victory-shader/src/emit/bitcode/integer_fold.rs b/crates/victory-shader/src/emit/bitcode/integer_fold.rs
+new file mode 100644
+index 0000000..06d4fa8
+--- /dev/null
++++ b/crates/victory-shader/src/emit/bitcode/integer_fold.rs
+@@ -0,0 +1,219 @@
++use super::{Bin, MdDef, Module, Op, Term, TypeDef, V, pred};
++
++impl Module {
++    pub(crate) fn fold_integer_constants(&mut self) {
++        let mut constants = vec![None; self.insts.len()];
++        for i in 0..self.insts.len() {
++            let result = match self.insts[i].op {
++                Op::Bin(op, a, b) => {
++                    self.fold_binary(op, substitute(&constants, a), substitute(&constants, b))
++                }
++                Op::Cmp(op, a, b) => {
++                    self.fold_compare(op, substitute(&constants, a), substitute(&constants, b))
++                }
++                _ => None,
++            };
++            constants[i] = result.map(|result| self.int_const(self.insts[i].ty, result));
++        }
++        if constants.iter().all(Option::is_none) {
++            return;
++        }
++        let replace = |v: &mut V| *v = substitute(&constants, *v);
++        for inst in &mut self.insts {
++            match &mut inst.op {
++                Op::Bin(_, a, b) | Op::Cmp(_, a, b) | Op::Store(a, b) | Op::AtomicRmw(_, a, b) => {
++                    replace(a);
++                    replace(b);
++                }
++                Op::Cast(_, v) | Op::Extract(v, _) | Op::Load(v) => replace(v),
++                Op::Select(a, b, c) | Op::CmpXchg(a, b, c) => {
++                    replace(a);
++                    replace(b);
++                    replace(c);
++                }
++                Op::Call(_, args) => args.iter_mut().for_each(replace),
++                Op::Phi(inc) => inc.iter_mut().for_each(|entry| replace(&mut entry.0)),
++                Op::Gep(_, ptr, indices) => {
++                    replace(ptr);
++                    indices.iter_mut().for_each(replace);
++                }
++            }
++        }
++        for block in &mut self.blocks {
++            if let Some(Term::CondBr(v, _, _)) = &mut block.term {
++                replace(v);
++            }
++        }
++        for md in &mut self.mds {
++            if let MdDef::Value(_, v) = md {
++                replace(v);
++            }
++        }
++    }
++
++    fn integer_operands(&self, a: V, b: V) -> Option<(u32, u64, u64)> {
++        let (x, y) = (self.int_value(a)? as u64, self.int_value(b)? as u64);
++        let ty = self.type_of(a);
++        let TypeDef::Int(bits @ 1..=64) = self.types[ty.0 as usize] else {
++            return None;
++        };
++        (ty == self.type_of(b)).then(|| {
++            let mask = u64::MAX >> (64 - bits);
++            (bits, x & mask, y & mask)
++        })
++    }
++
++    fn fold_binary(&self, op: Bin, a: V, b: V) -> Option<i64> {
++        let (bits, a, b) = self.integer_operands(a, b)?;
++        let value = match op {
++            Bin::Add => a.wrapping_add(b),
++            Bin::Sub => a.wrapping_sub(b),
++            Bin::Mul => a.wrapping_mul(b),
++            Bin::And => a & b,
++            Bin::Or => a | b,
++            Bin::Xor => a ^ b,
++            Bin::Shl if b < u64::from(bits) => a << b,
++            Bin::LShr if b < u64::from(bits) => a >> b,
++            Bin::AShr if b < u64::from(bits) => (signed(bits, a) >> b) as u64,
++            Bin::UDiv => a.checked_div(b)?,
++            Bin::URem => a.checked_rem(b)?,
++            Bin::SDiv => {
++                let (a, b) = (signed(bits, a), signed(bits, b));
++                let result = a.checked_div(b)?;
++                if result != signed(bits, result as u64) {
++                    return None;
++                }
++                result as u64
++            }
++            _ => return None,
++        };
++        Some(signed(bits, value))
++    }
++
++    fn fold_compare(&self, op: u8, a: V, b: V) -> Option<i64> {
++        let (bits, a, b) = self.integer_operands(a, b)?;
++        let (sa, sb) = (signed(bits, a), signed(bits, b));
++        Some(-i64::from(match op {
++            pred::EQ => a == b,
++            pred::NE => a != b,
++            pred::IUGT => a > b,
++            pred::IUGE => a >= b,
++            pred::IULT => a < b,
++            pred::IULE => a <= b,
++            pred::SGT => sa > sb,
++            pred::SGE => sa >= sb,
++            pred::SLT => sa < sb,
++            pred::SLE => sa <= sb,
++            _ => return None,
++        }))
++    }
++}
++
++fn substitute(constants: &[Option<V>], value: V) -> V {
++    match value {
++        V::Inst(i) => constants[i as usize].unwrap_or(value),
++        _ => value,
++    }
++}
++
++fn signed(bits: u32, value: u64) -> i64 {
++    ((value << (64 - bits)) as i64) >> (64 - bits)
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++
++    #[test]
++    fn integer_folding_uses_existing_branch_and_liveness_plan() {
++        let mut module = Module::default();
++        let void = module.void();
++        let int = module.int(32);
++        let main = module.func_ty(void, vec![]);
++        module.function("main", main, None, true);
++        let sink_ty = module.func_ty(void, vec![int]);
++        let sink = module.function("sink", sink_ty, None, false);
++        let (entry, yes, no, join) = (
++            module.new_block(),
++            module.new_block(),
++            module.new_block(),
++            module.new_block(),
++        );
++        let max = module.i32(u32::MAX);
++        let two = module.i32(2);
++        let zero = module.i32(0);
++        let one = module.bin(entry, Bin::Add, max, two);
++        let condition = module.cmp(entry, pred::NE, one, zero);
++        module.terminate(entry, Term::CondBr(condition, yes, no));
++        module.terminate(yes, Term::Br(join));
++        module.terminate(no, Term::Br(join));
++        let selected = module.phi(join, int);
++        module.set_phi(selected, vec![(one, yes), (two, no)]);
++        module.call(join, sink, vec![selected]);
++        module.terminate(join, Term::Ret);
++        let before = module.write();
++        assert_eq!(module.written_shape().2, 1);
++        module.fold_integer_constants();
++        assert_eq!(module.written_shape().2, 0);
++        let V::Inst(i) = selected else { unreachable!() };
++        let Op::Phi(values) = &module.insts[i as usize].op else {
++            unreachable!()
++        };
++        assert_eq!(module.int_value(values[0].0), Some(1));
++        assert!(module.write().len() < before.len());
++    }
++
++    #[test]
++    fn integer_folding_preserves_undefined_and_float_operations() {
++        let mut module = Module::default();
++        let min = module.i8(128);
++        let minus_one = module.i8(255);
++        let zero = module.i8(0);
++        let shift = module.i8(8);
++        let float = module.f32(0);
++        let i64_ty = module.int(64);
++        let wide_min = module.int_const(i64_ty, i64::MIN);
++        let wide_neg = module.int_const(i64_ty, -1);
++        assert_eq!(module.fold_binary(Bin::SDiv, min, minus_one), None);
++        assert_eq!(module.fold_binary(Bin::SDiv, wide_min, wide_neg), None);
++        assert_eq!(module.fold_binary(Bin::UDiv, min, zero), None);
++        assert_eq!(module.fold_binary(Bin::AShr, min, shift), None);
++        assert_eq!(module.fold_binary(Bin::Add, float, float), None);
++        assert_eq!(module.fold_binary(Bin::LShr, min, minus_one), None);
++        let one = module.i8(1);
++        assert_eq!(module.fold_binary(Bin::AShr, min, one), Some(-64));
++        assert_eq!(module.fold_compare(pred::SLT, min, zero), Some(-1));
++        assert_eq!(module.fold_compare(pred::IULT, min, zero), Some(0));
++    }
++
++    #[cfg(windows)]
++    #[test]
++    #[ignore = "requires Microsoft's DXIL validator"]
++    fn a_constant_written_by_a_compute_shader_validates() {
++        use crate::emit::bitcode::Attr;
++        use crate::emit::{shader::Shader, validator::Validator};
++
++        let mut shader = Shader::new(false);
++        shader.threads = Some([1, 1, 1]);
++        let entry = shader.entry;
++        let target = shader.view_writes_handle();
++        let (or, zero, one) = (shader.m.i32(2), shader.m.i32(0), shader.m.i32(1));
++        let value = shader.m.bin(entry, Bin::Add, one, one);
++        let unused = shader.m.undef(shader.t.i32);
++        shader.op(
++            entry,
++            "atomicBinOp.i32",
++            Attr::NoUnwind,
++            shader.t.i32,
++            78,
++            &[target, or, zero, unused, unused, value],
++        );
++        shader.m.terminate(entry, Term::Ret);
++        let mut dxil = shader.finish();
++        let path = Validator::default_path();
++        Validator::load(path.as_deref())
++            .unwrap()
++            .validate(&mut dxil)
++            .unwrap();
++    }
++}
+diff --git a/crates/victory-shader/src/emit/mod.rs b/crates/victory-shader/src/emit/mod.rs
+index 63771fb..0d4fc84 100644
+--- a/crates/victory-shader/src/emit/mod.rs
++++ b/crates/victory-shader/src/emit/mod.rs
+@@ -354,6 +354,38 @@ pub fn loop_limit() -> u32 {
+     })
+ }
+ 
++pub fn shader_opt() -> u32 {
++    static PASSES: std::sync::OnceLock<u32> = std::sync::OnceLock::new();
++    *PASSES.get_or_init(|| parse_shader_opt(std::env::var("VICTORY_SHADER_OPT").ok().as_deref()))
++}
++
++fn parse_shader_opt(value: Option<&str>) -> u32 {
++    value
++        .map(str::trim)
++        .and_then(|value| match value.strip_prefix("0x") {
++            Some(hex) => u32::from_str_radix(hex, 16).ok(),
++            None => value.parse().ok(),
++        })
++        .unwrap_or(0)
++        & 2
++}
++
++#[test]
++fn shader_cleanup_is_opt_in_and_selects_only_integer_folding() {
++    for (value, passes) in [
++        (None, 0),
++        (Some(""), 0),
++        (Some("invalid"), 0),
++        (Some("0"), 0),
++        (Some("1"), 0),
++        (Some("2"), 2),
++        (Some("0x1f"), 2),
++        (Some("28"), 0),
++    ] {
++        assert_eq!(parse_shader_opt(value), passes);
++    }
++}
++
+ /// `VICTORY_SHADER_LOOP_LIMIT`'s value; the default when it is unset,
+ /// unreadable or 0. Pure, for testing.
+ fn parse_loop_limit(value: Option<&str>) -> u32 {
+diff --git a/crates/victory-shader/src/emit/shader.rs b/crates/victory-shader/src/emit/shader.rs
+index f6689ac..195ebf4 100644
+--- a/crates/victory-shader/src/emit/shader.rs
++++ b/crates/victory-shader/src/emit/shader.rs
+@@ -625,6 +625,9 @@ impl Shader {
+     pub fn finish(mut self) -> Vec<u8> {
+         let ud_size = (self.user_data * 4).next_multiple_of(16);
+         self.fix_user_data_size(ud_size);
++        if super::shader_opt() != 0 {
++            self.m.fold_integer_constants();
++        }
+         // The flags of what lowering made, as the module writes it: what only
+         // unread values or never-taken edges used is not written.
+         let uses = self.m.uses();
+diff --git a/docs/macos.md b/docs/macos.md
+index 998d858..c950e32 100644
+--- a/docs/macos.md
++++ b/docs/macos.md
+@@ -347,6 +347,7 @@ None of these changes the default. Each is read from the environment when the ga
+ | `VICTORY_WINDOW_SECONDARY=1` | Opens the game window on the only non-primary display. |
+ | `VICTORY_WINDOW_SECONDARY=x,y` | Opens the game window on the display that holds the desktop point `x,y`, for layouts with more than one extra display (a Sidecar iPad beside two monitors, say). |
+ | `VICTORY_FRAME_WAITS=1` | Logs title pacing, queue waits and presentation wall time in release and diagnostics builds. |
++| `VICTORY_SHADER_OPT=2` | Folds defined integer constant arithmetic and comparisons before DXIL emission. Off by default and keyed separately for shader and pipeline caches. |
+ 
+ The frame wait report prints after a completed PresentX call at intervals of at least five seconds. Times are milliseconds per completed PresentX, including calls that did not display a picture. Queue pumping, submission settling and host presentation are phases inside PresentX. Frame sleeps and fence waits can run on other threads and overlap.
+ 

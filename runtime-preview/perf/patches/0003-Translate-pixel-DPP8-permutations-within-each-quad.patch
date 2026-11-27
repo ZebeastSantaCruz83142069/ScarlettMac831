@@ -1,0 +1,64 @@
+From 2b5f3981b11087d530ffe92df5443a81a54770fb Mon Sep 17 00:00:00 2001
+From: Pavel <pavel.rogojin@icloud.com>
+Date: Fri, 27 Nov 2026 11:53:54 +0100
+Subject: [PATCH 03/10] Translate pixel DPP8 permutations within each quad
+
+---
+ crates/victory-shader/src/emit/lower.rs     |  7 ++++--
+ crates/victory-shader/src/emit/mac_tests.rs | 25 +++++++++++++++++++++
+ 2 files changed, 30 insertions(+), 2 deletions(-)
+
+diff --git a/crates/victory-shader/src/emit/lower.rs b/crates/victory-shader/src/emit/lower.rs
+index 1cb2b1b..eabaaa6 100644
+--- a/crates/victory-shader/src/emit/lower.rs
++++ b/crates/victory-shader/src/emit/lower.rs
+@@ -6670,8 +6670,11 @@ impl<'a> Lower<'a> {
+             return Err("a DPP operand");
+         };
+         let x = self.i32_of(inst.read(Reg::V(reg)).ok_or("a DPP operand")?)?;
+-        // Quad permutations and DPP8 stay in groups the pixel layout shares.
+-        let quad = matches!(dpp, Dpp::Row { ctrl: 0..=0xFF, .. });
++        let quad = match dpp {
++            Dpp::Row { ctrl: 0..=0xFF, .. } => true,
++            Dpp::Lanes { sel, .. } => (0..8).all(|lane| ((sel >> (3 * lane)) ^ lane) & 4 == 0),
++            _ => false,
++        };
+         let mesh_quad = self.s.mesh.is_some() && quad;
+         if !mesh_quad {
+             self.cross_lane(quad)?;
+diff --git a/crates/victory-shader/src/emit/mac_tests.rs b/crates/victory-shader/src/emit/mac_tests.rs
+index 4d57980..5855289 100644
+--- a/crates/victory-shader/src/emit/mac_tests.rs
++++ b/crates/victory-shader/src/emit/mac_tests.rs
+@@ -274,6 +274,31 @@ fn the_early_depth_option_reaches_the_translation() {
+     }
+ }
+ 
++#[test]
++fn pixel_dpp8_requires_each_source_to_stay_in_its_quad() {
++    let emit = |first_source: u32| {
++        let selectors = [first_source, 0, 2, 1, 4, 6, 5, 7]
++            .into_iter()
++            .enumerate()
++            .fold(0, |bits, (lane, source)| bits | source << (lane * 3));
++        let mut words = colour();
++        words.splice(4..4, [v_mov(3, 233), selectors << 8 | 2]);
++        let native = pixel(&words, 0, POSITION);
++        let signature = container::signature(&[target()], false);
++        let bytes = crate::dxbc::build(&[(FourCC::OSG1, &signature)]);
++        let dxbc = Container::parse(&bytes).unwrap();
++        let program = ir::build(&native.patched_code(), native.wave64, native.vgprs).unwrap();
++        let structured = structure::structure(&program).unwrap();
++        let resources = resource::track(&program, &native.layout, native.stage, Some(&structured))
++            .unwrap();
++        let io = io::raise(&program, &native).unwrap();
++        emit_with(&dxbc, &native, &program, &structured, &io, &resources, Options::default())
++    };
++    assert!(emit(3).is_ok());
++    let error = emit(4).err().expect("a source outside the destination quad");
++    assert!(error.to_string().contains("a cross-lane operation outside compute"), "{error}");
++}
++
+ // ---- Lock writers (`Mac::lock_helpers`, `Mac::lock_keys`) ----
+ 
+ const WRITERS: Mac = Mac {

@@ -1,0 +1,291 @@
+From 29ebbcbccfc0df2bcb64a6294fc337a6fba325b8 Mon Sep 17 00:00:00 2001
+From: Pavel <pavel.rogojin@icloud.com>
+Date: Fri, 27 Nov 2026 11:53:55 +0100
+Subject: [PATCH 07/10] Measure title pacing, queue, fence and host present
+ waits
+
+---
+ crates/victory-gpu/src/fence.rs      |   1 +
+ crates/victory-gpu/src/frame.rs      |   4 +
+ crates/victory-gpu/src/frame_wait.rs | 158 +++++++++++++++++++++++++++
+ crates/victory-gpu/src/host.rs       |   1 +
+ crates/victory-gpu/src/lib.rs        |   2 +
+ crates/victory-gpu/src/queue.rs      |  15 ++-
+ docs/macos.md                        |   3 +
+ 7 files changed, 182 insertions(+), 2 deletions(-)
+ create mode 100644 crates/victory-gpu/src/frame_wait.rs
+
+diff --git a/crates/victory-gpu/src/fence.rs b/crates/victory-gpu/src/fence.rs
+index 8ba79d4..6cd0382 100644
+--- a/crates/victory-gpu/src/fence.rs
++++ b/crates/victory-gpu/src/fence.rs
+@@ -97,6 +97,7 @@ extern "system" fn set_event_on_completion(this: This, value: u64, event: *mut c
+     // submission is finished, here if nothing has yet.
+     #[cfg(windows)]
+     if event.is_null() && fence.value.load(Ordering::Acquire) < value {
++        let _timer = crate::frame_wait::time(crate::frame_wait::Call::CpuFenceSettle);
+         crate::host::unwaited::settle(crate::host::unwaited::By::Signal);
+     }
+     let mut waiters = fence.waiters.lock().unwrap_or_else(|e| e.into_inner());
+diff --git a/crates/victory-gpu/src/frame.rs b/crates/victory-gpu/src/frame.rs
+index b655283..a33acea 100644
+--- a/crates/victory-gpu/src/frame.rs
++++ b/crates/victory-gpu/src/frame.rs
+@@ -154,6 +154,8 @@ pub(crate) extern "system" fn wait(
+     // The tick is only logged (diagnostics); taking it is what counts.
+     #[cfg_attr(not(feature = "diagnostics"), allow(unused_variables))]
+     let (tick, wait) = next_tick(kind, limit);
++    #[cfg(windows)]
++    let sleep_timer = crate::frame_wait::time(crate::frame_wait::Call::FrameSleep);
+     let hr = if wait > limit {
+         std::thread::sleep(limit);
+         TIMEOUT
+@@ -161,6 +163,8 @@ pub(crate) extern "system" fn wait(
+         std::thread::sleep(wait);
+         S_OK
+     };
++    #[cfg(windows)]
++    drop(sleep_timer);
+     #[cfg(feature = "diagnostics")]
+     {
+         WAITS[0].fetch_add(1, Ordering::Relaxed);
+diff --git a/crates/victory-gpu/src/frame_wait.rs b/crates/victory-gpu/src/frame_wait.rs
+new file mode 100644
+index 0000000..1ef4176
+--- /dev/null
++++ b/crates/victory-gpu/src/frame_wait.rs
+@@ -0,0 +1,158 @@
++use std::time::{Duration, Instant};
++
++#[derive(Clone, Copy)]
++pub(crate) enum Call {
++    Present,
++    PresentPump,
++    PresentSettle,
++    HostPresent,
++    FrameSleep,
++    QueueWait,
++    CpuFenceSettle,
++}
++
++const CALLS: usize = Call::CpuFenceSettle as usize + 1;
++const INTERVAL: Duration = Duration::from_secs(5);
++
++#[derive(Clone, Copy, Default)]
++struct Totals {
++    calls: u64,
++    elapsed: Duration,
++}
++
++struct Window {
++    since: Instant,
++    totals: [Totals; CALLS],
++}
++
++impl Window {
++    fn new(since: Instant) -> Self {
++        Self {
++            since,
++            totals: Default::default(),
++        }
++    }
++
++    fn complete(&mut self, call: Call, elapsed: Duration, now: Instant) -> Option<[Totals; CALLS]> {
++        let totals = &mut self.totals[call as usize];
++        totals.calls += 1;
++        totals.elapsed += elapsed;
++        if matches!(call, Call::Present) && now.saturating_duration_since(self.since) >= INTERVAL {
++            self.since = now;
++            return Some(std::mem::take(&mut self.totals));
++        }
++        None
++    }
++}
++
++#[cfg(windows)]
++pub(crate) use runtime::time;
++
++#[cfg(windows)]
++mod runtime {
++    use super::{Call, Window};
++    use std::sync::{Mutex, OnceLock};
++    use std::time::Instant;
++
++    static WINDOW: OnceLock<Option<Mutex<Window>>> = OnceLock::new();
++
++    pub(crate) struct Timer {
++        call: Call,
++        start: Instant,
++        window: &'static Mutex<Window>,
++    }
++
++    pub(crate) fn time(call: Call) -> Option<Timer> {
++        WINDOW
++            .get_or_init(|| {
++                (std::env::var("VICTORY_FRAME_WAITS").as_deref() == Ok("1"))
++                    .then(|| Mutex::new(Window::new(Instant::now())))
++            })
++            .as_ref()
++            .map(|window| Timer {
++                call,
++                start: Instant::now(),
++                window,
++            })
++    }
++
++    impl Drop for Timer {
++        fn drop(&mut self) {
++            let now = Instant::now();
++            let elapsed = now.duration_since(self.start);
++            let sample = self
++                .window
++                .lock()
++                .unwrap_or_else(|e| e.into_inner())
++                .complete(self.call, elapsed, now);
++            let Some([present, pump, settle, show, sleep, queue, fence]) = sample else {
++                return;
++            };
++            let ms = |elapsed: std::time::Duration| {
++                elapsed.as_secs_f64() * 1000.0 / present.calls as f64
++            };
++            tracing::info!(
++                presents = present.calls,
++                present_ms = %format_args!("{:.1}", ms(present.elapsed)),
++                queue_pump_ms = %format_args!("{:.1}", ms(pump.elapsed)),
++                present_settle_ms = %format_args!("{:.1}", ms(settle.elapsed)),
++                host_present_ms = %format_args!("{:.1}", ms(show.elapsed)),
++                frame_sleep_calls = sleep.calls,
++                frame_sleep_ms = %format_args!("{:.1}", ms(sleep.elapsed)),
++                queue_wait_calls = queue.calls,
++                queue_wait_ms = %format_args!("{:.1}", ms(queue.elapsed)),
++                cpu_fence_settle_calls = fence.calls,
++                cpu_fence_settle_ms = %format_args!("{:.1}", ms(fence.elapsed)),
++                "frame wait wall time per completed PresentX"
++            );
++        }
++    }
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++
++    #[test]
++    fn reports_each_phase_at_a_completed_present_and_resets() {
++        let start = Instant::now();
++        let mut window = Window::new(start);
++        let short = Duration::from_millis(10);
++        let phases = [
++            Call::PresentPump,
++            Call::PresentSettle,
++            Call::HostPresent,
++            Call::FrameSleep,
++            Call::QueueWait,
++            Call::CpuFenceSettle,
++        ];
++        for (index, phase) in phases.into_iter().enumerate() {
++            let elapsed = short * (index as u32 + 1);
++            assert!(window.complete(phase, elapsed, start + short).is_none());
++        }
++        assert!(
++            window
++                .complete(Call::Present, short, start + short)
++                .is_none()
++        );
++        assert!(
++            window
++                .complete(Call::FrameSleep, short, start + INTERVAL)
++                .is_none()
++        );
++
++        let report = window
++            .complete(Call::Present, short, start + INTERVAL)
++            .unwrap();
++        assert_eq!(report.map(|phase| phase.calls), [2, 1, 1, 1, 2, 1, 1]);
++        assert_eq!(
++            report.map(|phase| phase.elapsed.as_millis()),
++            [20, 10, 20, 30, 50, 50, 60]
++        );
++
++        let next = window
++            .complete(Call::Present, short, start + INTERVAL * 2)
++            .unwrap();
++        assert_eq!(next.map(|phase| phase.calls), [1, 0, 0, 0, 0, 0, 0]);
++    }
++}
+diff --git a/crates/victory-gpu/src/host.rs b/crates/victory-gpu/src/host.rs
+index 473fdb3..9db4b76 100644
+--- a/crates/victory-gpu/src/host.rs
++++ b/crates/victory-gpu/src/host.rs
+@@ -5324,6 +5324,7 @@ impl Host {
+         overlay: Option<(&ID3D12Resource, u32)>,
+         frame: u64,
+     ) -> Option<bool> {
++        let _timer = crate::frame_wait::time(crate::frame_wait::Call::HostPresent);
+         // SAFETY: a live resource.
+         let desc = unsafe { texture.GetDesc() };
+         let Some(picture_format) = swap_format(desc.Format) else {
+diff --git a/crates/victory-gpu/src/lib.rs b/crates/victory-gpu/src/lib.rs
+index e347c66..a49333f 100644
+--- a/crates/victory-gpu/src/lib.rs
++++ b/crates/victory-gpu/src/lib.rs
+@@ -61,6 +61,8 @@ pub mod fence;
+ #[cfg(any(windows, test))]
+ mod flights;
+ pub mod frame;
++#[cfg(any(windows, test))]
++mod frame_wait;
+ mod hold;
+ #[cfg(windows)]
+ mod host;
+diff --git a/crates/victory-gpu/src/queue.rs b/crates/victory-gpu/src/queue.rs
+index a8e22e4..4fd1345 100644
+--- a/crates/victory-gpu/src/queue.rs
++++ b/crates/victory-gpu/src/queue.rs
+@@ -461,6 +461,8 @@ extern "system" fn wait(this: This, fence: This, value: u64) -> HRESULT {
+         return E_INVALIDARG;
+     }
+     #[cfg(windows)]
++    let _timer = crate::frame_wait::time(crate::frame_wait::Call::QueueWait);
++    #[cfg(windows)]
+     if crate::host::host().is_some() && crate::fence::value(fence) < value {
+         let mut held = held();
+         held.push(this as usize, Item::FenceWait(fence as usize, value));
+@@ -672,13 +674,22 @@ extern "system" fn present(
+     plane_parameters: *const Plane,
+     _parameters: *const u8,
+ ) -> HRESULT {
++    #[cfg(windows)]
++    let _timer = crate::frame_wait::time(crate::frame_wait::Call::Present);
+     // What may run before the frame is shown does.
+     // shortcut: PresentX does not wait behind work the queue still holds (it
+     // shows the frame as far as it ran); the frame line names such work.
+-    pump_held(Why::Present);
++    {
++        #[cfg(windows)]
++        let _timer = crate::frame_wait::time(crate::frame_wait::Call::PresentPump);
++        pump_held(Why::Present);
++    }
+     // What ran is finished, before the picture and its state are looked at.
+     #[cfg(windows)]
+-    unwaited::settle(unwaited::By::Present);
++    {
++        let _timer = crate::frame_wait::time(crate::frame_wait::Call::PresentSettle);
++        unwaited::settle(unwaited::By::Present);
++    }
+     let frame = FRAMES.fetch_add(1, Ordering::Relaxed) + 1;
+     #[cfg(windows)]
+     account_frame(frame);
+diff --git a/docs/macos.md b/docs/macos.md
+index 2e917f2..998d858 100644
+--- a/docs/macos.md
++++ b/docs/macos.md
+@@ -346,5 +346,8 @@ None of these changes the default. Each is read from the environment when the ga
+ | `VICTORY_STEP_OVER=pool` | Steps over the title's "no free element" traps: an `int3` followed by `xor r, r`, the shape of a full fixed-size pool's allocator, whose caller then gets the NULL it already checks for. Series 1.0.2.1 hits one at `+0x5149aec` (the instance lists' pool, Marvisak/VIctory#698) about 20 minutes into the opening when frames take seconds. A list of hex offsets also works. |
+ | `VICTORY_WINDOW_SECONDARY=1` | Opens the game window on the only non-primary display. |
+ | `VICTORY_WINDOW_SECONDARY=x,y` | Opens the game window on the display that holds the desktop point `x,y`, for layouts with more than one extra display (a Sidecar iPad beside two monitors, say). |
++| `VICTORY_FRAME_WAITS=1` | Logs title pacing, queue waits and presentation wall time in release and diagnostics builds. |
++
++The frame wait report prints after a completed PresentX call at intervals of at least five seconds. Times are milliseconds per completed PresentX, including calls that did not display a picture. Queue pumping, submission settling and host presentation are phases inside PresentX. Frame sleeps and fence waits can run on other threads and overlap.
+ 
+ To find what the estimate costs on the GPU in a scene, `VICTORY_AMBIENT_PROBE=<n>` leaves its passes out in turn, each step for `n` frame lines: nothing, the gather, the creases' shade, the reflections' hold, the keeping, the raising, every pass. The estimate's line ends with the step the frame line above it was measured with (`probe (VICTORY_AMBIENT_PROBE) step 1 of 7: these frames were recorded without the gather ...`), so one run gives the frame line's GPU time with and without each part. The picture changes with the steps. Each pass is also named among its list's pipelines (`[ambient estimate: gather]` and so on), so a `slow host submission` or `slow host list` line says when a slow list holds one. In a diagnostics build with `VICTORY_GPU_TIMING=1` and `VICTORY_D3D12_DRED=1`, a slow list also logs `slow list commands by kind`, since GPU timestamps read 0 under D3DMetal.

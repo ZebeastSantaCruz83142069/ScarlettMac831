@@ -1,0 +1,505 @@
+From e410eb0f9272d7b05a04cfe05dbb15f452198208 Mon Sep 17 00:00:00 2001
+From: Pavel <pavel.rogojin@icloud.com>
+Date: Fri, 27 Nov 2026 11:53:55 +0100
+Subject: [PATCH 04/10] Add a queued input file and verify GameInput history
+
+---
+ crates/victory-hle/src/modules/gameinput.rs   | 142 +++++++------
+ .../src/modules/gameinput_script.rs           | 200 ++++++++++++++++++
+ docs/macos.md                                 |  18 ++
+ 3 files changed, 297 insertions(+), 63 deletions(-)
+ create mode 100644 crates/victory-hle/src/modules/gameinput_script.rs
+
+diff --git a/crates/victory-hle/src/modules/gameinput.rs b/crates/victory-hle/src/modules/gameinput.rs
+index 7c46c34..04ae1a6 100644
+--- a/crates/victory-hle/src/modules/gameinput.rs
++++ b/crates/victory-hle/src/modules/gameinput.rs
+@@ -22,6 +22,10 @@ use super::xasync::{E_INVALIDARG, E_NOINTERFACE, E_NOTIMPL};
+ use super::xgameruntime::{HRESULT, S_OK};
+ use crate::{HleExport, HleModule};
+ 
++#[cfg(any(windows, test))]
++#[path = "gameinput_script.rs"]
++mod script;
++
+ /// The documented errors.
+ pub const DEVICE_DISCONNECTED: HRESULT = 0x838A_0001_u32 as i32;
+ pub const DEVICE_NOT_FOUND: HRESULT = 0x838A_0002_u32 as i32;
+@@ -111,8 +115,7 @@ trait Source: Send {
+     fn pad(&mut self, slot: usize) -> Option<PadState>;
+     /// Keys held down; none while the title's window lacks focus.
+     fn keys(&mut self) -> Vec<KeyState>;
+-    /// Scripted diagnostic keys (`VICTORY_KEYS`), independent of focus.
+-    #[cfg(any(test, feature = "diagnostics"))]
++    /// Scripted keys, independent of focus.
+     fn scripted_keys(&mut self) -> Vec<KeyState> {
+         Vec::new()
+     }
+@@ -142,8 +145,6 @@ fn fallback(keys: &[KeyState]) -> PadState {
+     }
+ }
+ 
+-/// Combines `extra` (from `VICTORY_KEYS`) onto `base` (a physical host pad).
+-#[cfg(any(test, feature = "diagnostics"))]
+ fn merge_pad(base: PadState, extra: PadState) -> PadState {
+     PadState {
+         buttons: base.buttons | extra.buttons,
+@@ -156,9 +157,6 @@ fn merge_pad(base: PadState, extra: PadState) -> PadState {
+     }
+ }
+ 
+-/// Applies `scripted` keys to the first connected host pad, so `VICTORY_KEYS`
+-/// works even when an XInput or virtual controller disables `FALLBACK`.
+-#[cfg(any(test, feature = "diagnostics"))]
+ fn merge_scripted(pads: &mut [Option<PadState>; PADS], scripted: &[KeyState]) {
+     if scripted.is_empty() {
+         return;
+@@ -435,13 +433,10 @@ impl Hub {
+         let (pads, keys, scripted) = {
+             let mut source = lock(&self.source);
+             let pads: [_; PADS] = std::array::from_fn(|slot| source.pad(slot));
+-            #[cfg(any(test, feature = "diagnostics"))]
+             let scripted = source.scripted_keys();
+-            #[cfg(not(any(test, feature = "diagnostics")))]
+-            let scripted: [KeyState; 0] = [];
+             (pads, source.keys(), scripted)
+         };
+-        let events = self.state().poll(&self.devices, pads, keys, &scripted);
++        let events = self.state().poll(&self.devices, pads, keys, scripted);
+         self.deliver(events);
+     }
+ 
+@@ -485,8 +480,8 @@ impl State {
+         &mut self,
+         devices: &[Device; DEVICES],
+         pads: [Option<PadState>; PADS],
+-        keys: Vec<KeyState>,
+-        scripted: &[KeyState],
++        mut keys: Vec<KeyState>,
++        scripted: Vec<KeyState>,
+     ) -> Vec<Event> {
+         let now = now();
+         let mut events = std::mem::take(&mut self.pending);
+@@ -502,22 +497,17 @@ impl State {
+             }
+             self.seen_input[slot].then_some(pad)
+         });
+-        #[cfg(any(test, feature = "diagnostics"))]
+-        merge_scripted(&mut pads, scripted);
+-        #[cfg(not(any(test, feature = "diagnostics")))]
+-        let _ = (&mut pads, scripted);
++        merge_scripted(&mut pads, &scripted);
+         let any_pad = pads.iter().any(Option::is_some);
+         for (slot, pad) in pads.into_iter().enumerate() {
+             self.update(devices, slot, pad.map(Value::Pad), now, &mut events);
+         }
+-        let fallback = (!any_pad).then(|| {
+-            let base = fallback(&keys);
+-            #[cfg(any(test, feature = "diagnostics"))]
+-            if !scripted.is_empty() {
+-                return Value::Pad(merge_pad(base, fallback(scripted)));
++        for key in scripted {
++            if !keys.iter().any(|held| held.virtual_key == key.virtual_key) {
++                keys.push(key);
+             }
+-            Value::Pad(base)
+-        });
++        }
++        let fallback = (!any_pad).then(|| Value::Pad(fallback(&keys)));
+         self.update(devices, FALLBACK, fallback, now, &mut events);
+         self.update(devices, KEYBOARD, Some(Value::Keys(keys)), now, &mut events);
+         events
+@@ -1198,9 +1188,18 @@ mod host {
+         }
+     }
+ 
+-    #[derive(Default)]
+     pub(super) struct Host {
+         empty_until: [Option<Instant>; PADS],
++        input: script::FileQueue,
++    }
++
++    impl Default for Host {
++        fn default() -> Self {
++            Self {
++                empty_until: [None; PADS],
++                input: script::FileQueue::from_env(),
++            }
++        }
+     }
+ 
+     fn key_state(vk: u8) -> KeyState {
+@@ -1230,32 +1229,23 @@ mod host {
+         }
+ 
+         fn keys(&mut self) -> Vec<KeyState> {
+-            // macOS port: scripted keys also in the normal build, so a test
+-            // run needs nobody at the keyboard (empty unless VICTORY_KEYS is set).
+-            let mut down = scripted();
+-            if focused() {
+-                // Left/right modifier keys only, as devices report them; no
+-                // mouse buttons (below 0x08).
+-                let held: Vec<u8> = (0x08..=0xFE_u8)
+-                    .filter(|vk| !(0x10..=0x12).contains(vk) && !down.contains(vk))
+-                    // SAFETY: plain queries.
+-                    .filter(|&vk| unsafe { GetAsyncKeyState(i32::from(vk)) } < 0)
+-                    .collect();
+-                down.extend(held);
++            if !focused() {
++                return Vec::new();
+             }
+-            down.into_iter().map(key_state).collect()
++            // Left/right modifier keys only, as devices report them; no
++            // mouse buttons (below 0x08).
++            (0x08..=0xFE_u8)
++                .filter(|vk| !(0x10..=0x12).contains(vk))
++                // SAFETY: plain queries.
++                .filter(|&vk| unsafe { GetAsyncKeyState(i32::from(vk)) } < 0)
++                .map(key_state)
++                .collect()
+         }
+ 
+-        #[cfg(any(test, feature = "diagnostics"))]
+         fn scripted_keys(&mut self) -> Vec<KeyState> {
+-            #[cfg(feature = "diagnostics")]
+-            {
+-                scripted().into_iter().map(key_state).collect()
+-            }
+-            #[cfg(not(feature = "diagnostics"))]
+-            {
+-                Vec::new()
+-            }
++            let mut held = scripted();
++            self.input.update(Instant::now(), &mut held);
++            held.into_iter().map(key_state).collect()
+         }
+ 
+         fn rumble(&mut self, slot: usize, low: u16, high: u16) {
+@@ -1286,20 +1276,7 @@ mod host {
+                     Some((key, held)) => (key, Duration::try_from_secs_f64(held.trim().parse().ok()?).ok()?),
+                     None => (key, Duration::from_millis(200)),
+                 };
+-                let vk = match key.trim() {
+-                    "Enter" => 0x0D,
+-                    "Esc" => 0x1B,
+-                    "Tab" => 0x09,
+-                    "Back" => 0x08,
+-                    "Up" => 0x26,
+-                    "Down" => 0x28,
+-                    "Left" => 0x25,
+-                    "Right" => 0x27,
+-                    k if k.len() == 1 && k.as_bytes()[0].is_ascii_alphanumeric() => {
+-                        k.as_bytes()[0].to_ascii_uppercase()
+-                    }
+-                    _ => return None,
+-                };
++                let vk = script::virtual_key(key.trim())?;
+                 Some((
+                     Duration::try_from_secs_f64(at.trim().parse().ok()?).ok()?,
+                     vk,
+@@ -1311,7 +1288,7 @@ mod host {
+         let (start, keys) = &*SCRIPT;
+         let now = start.elapsed();
+         keys.iter()
+-            .filter(|&&(at, _, held)| (at..at + held).contains(&now))
++            .filter(|&&(at, _, held)| now.checked_sub(at).is_some_and(|elapsed| elapsed < held))
+             .map(|&(_, vk, _)| vk)
+             .collect()
+     }
+@@ -1779,6 +1756,44 @@ mod tests {
+         assert_eq!(host.lock().unwrap().rumble, [(2, 32767, 65535), (2, 0, 0)]);
+     }
+ 
++    #[test]
++    fn tap_can_be_read_after_release() {
++        let (hub, host) = fake();
++        let neutral = current(hub, GAMEPAD_KIND, FALLBACK).unwrap();
++        host.lock().unwrap().scripted = vec![key(0x0D)];
++        hub.poll();
++        host.lock().unwrap().scripted.clear();
++        hub.poll();
++
++        let pressed = walk(hub, 0x28, neutral).unwrap();
++        let released = walk(hub, 0x28, pressed).unwrap();
++        assert_eq!(pad(pressed).buttons, A);
++        assert_eq!(pad(released), PadState::default());
++        assert_eq!(walk(hub, 0x28, released), Err(READING_NOT_FOUND));
++        for reading in [neutral, pressed, released] {
++            release(reading);
++        }
++    }
++
++    #[test]
++    fn subscriber_reports_an_overrun_and_can_resume_from_current() {
++        let (hub, host) = fake();
++        let first = current(hub, GAMEPAD_KIND, FALLBACK).unwrap();
++        for index in 0..HISTORY {
++            host.lock().unwrap().scripted = if index % 2 == 0 { vec![key(b'W')] } else { Vec::new() };
++            hub.poll();
++        }
++        assert_eq!(walk(hub, 0x28, first), Err(REFERENCE_TOO_OLD));
++        let current = current(hub, GAMEPAD_KIND, FALLBACK).unwrap();
++        host.lock().unwrap().scripted = vec![key(b'J')];
++        hub.poll();
++        let next = walk(hub, 0x28, current).unwrap();
++        assert_eq!(pad(next).right_x, -1.0);
++        for reading in [first, current, next] {
++            release(reading);
++        }
++    }
++
+     #[test]
+     fn scripted_keys_merge_into_connected_host_pad() {
+         let (hub, host) = fake();
+@@ -1790,7 +1805,7 @@ mod tests {
+         {
+             let mut h = host.lock().unwrap();
+             h.pads[1] = Some(physical);
+-            h.scripted = vec![key(0x0D), key(b'W'), key(b'C')];
++            h.scripted = vec![key(0x0D), key(b'W'), key(b'L'), key(b'C')];
+         }
+         hub.poll();
+ 
+@@ -1802,6 +1817,7 @@ mod tests {
+                 buttons: B | A,
+                 left_x: -0.5,
+                 left_y: 1.0,
++                right_x: 1.0,
+                 right_trigger: 1.0,
+                 ..Default::default()
+             }
+diff --git a/crates/victory-hle/src/modules/gameinput_script.rs b/crates/victory-hle/src/modules/gameinput_script.rs
+new file mode 100644
+index 0000000..18e1a3b
+--- /dev/null
++++ b/crates/victory-hle/src/modules/gameinput_script.rs
+@@ -0,0 +1,200 @@
++use std::fs::File;
++use std::io::{self, Read, Seek, SeekFrom};
++use std::path::Path;
++use std::time::{Duration, Instant};
++
++const READ_INTERVAL: Duration = Duration::from_millis(50);
++const TAP: Duration = Duration::from_millis(200);
++const MAX_LINE: usize = 128;
++const MAX_PENDING: usize = 256;
++
++struct Press {
++    starts: Instant,
++    ends: Instant,
++    key: u8,
++}
++
++#[derive(Default)]
++pub(super) struct FileQueue {
++    file: Option<File>,
++    next_read: Option<Instant>,
++    line: Vec<u8>,
++    skip_line: bool,
++    scheduled: Vec<Press>,
++}
++
++impl FileQueue {
++    #[cfg(windows)]
++    pub(super) fn from_env() -> Self {
++        let Some(path) = std::env::var_os("VICTORY_KEYS_FILE").filter(|path| !path.is_empty())
++        else {
++            return Self::default();
++        };
++        Self::open(Path::new(&path)).unwrap_or_else(|error| {
++            tracing::warn!(%error, "could not open VICTORY_KEYS_FILE");
++            Self::default()
++        })
++    }
++
++    fn open(path: &Path) -> io::Result<Self> {
++        if !path.metadata()?.is_file() {
++            return Err(io::Error::new(
++                io::ErrorKind::InvalidInput,
++                "expected a regular file",
++            ));
++        }
++        let mut file = File::open(path)?;
++        file.seek(SeekFrom::End(0))?;
++        Ok(Self {
++            file: Some(file),
++            ..Self::default()
++        })
++    }
++
++    pub(super) fn update(&mut self, now: Instant, held: &mut Vec<u8>) {
++        self.scheduled.retain(|press| press.ends > now);
++        if let Some(file) = self.file.as_mut()
++            && self.next_read.is_none_or(|next| now >= next)
++        {
++            self.next_read = Some(now + READ_INTERVAL);
++            let mut bytes = [0; 4096];
++            match file.read(&mut bytes) {
++                Ok(size) => self.read_lines(now, &bytes[..size]),
++                Err(error) if error.kind() == io::ErrorKind::Interrupted => {}
++                Err(error) => {
++                    tracing::warn!(%error, "could not read VICTORY_KEYS_FILE");
++                    self.file = None;
++                    self.scheduled.clear();
++                }
++            }
++        }
++        for press in &self.scheduled {
++            if now >= press.starts && !held.contains(&press.key) {
++                held.push(press.key);
++            }
++        }
++    }
++
++    fn read_lines(&mut self, now: Instant, bytes: &[u8]) {
++        for &byte in bytes {
++            if byte == b'\n' {
++                if !self.skip_line
++                    && let Ok(line) = std::str::from_utf8(&self.line)
++                {
++                    if line.trim().eq_ignore_ascii_case("release") {
++                        self.scheduled.clear();
++                    } else if self.scheduled.len() < MAX_PENDING
++                        && let Some(press) = parse(line, now)
++                    {
++                        self.scheduled.push(press);
++                    }
++                }
++                self.line.clear();
++                self.skip_line = false;
++            } else if !self.skip_line {
++                if self.line.len() < MAX_LINE {
++                    self.line.push(byte);
++                } else {
++                    self.skip_line = true;
++                }
++            }
++        }
++    }
++}
++
++fn parse(line: &str, now: Instant) -> Option<Press> {
++    let mut fields = line.split_ascii_whitespace();
++    let key = virtual_key(fields.next()?)?;
++    let duration = |value: &str, max: u64| {
++        Duration::try_from_secs_f64(value.parse().ok()?)
++            .ok()
++            .filter(|time| *time <= Duration::from_secs(max))
++    };
++    let held = match fields.next() {
++        Some(value) => duration(value, 60)?,
++        None => TAP,
++    };
++    let delay = match fields.next() {
++        Some(value) => duration(value, 600)?,
++        None => Duration::ZERO,
++    };
++    if held.is_zero() || fields.next().is_some() {
++        return None;
++    }
++    let starts = now + delay;
++    Some(Press {
++        starts,
++        ends: starts + held,
++        key,
++    })
++}
++
++pub(super) fn virtual_key(key: &str) -> Option<u8> {
++    Some(match key {
++        "Enter" => 0x0D,
++        "Esc" => 0x1B,
++        "Tab" => 0x09,
++        "Back" => 0x08,
++        "Up" => 0x26,
++        "Down" => 0x28,
++        "Left" => 0x25,
++        "Right" => 0x27,
++        k if k.len() == 1 && k.as_bytes()[0].is_ascii_alphanumeric() => {
++            k.as_bytes()[0].to_ascii_uppercase()
++        }
++        _ => return None,
++    })
++}
++
++#[cfg(test)]
++mod tests {
++    use std::io::Write;
++
++    use super::*;
++
++    fn keys(queue: &mut FileQueue, now: Instant) -> Vec<u8> {
++        let mut held = Vec::new();
++        queue.update(now, &mut held);
++        held
++    }
++
++    #[test]
++    fn live_taps_holds_and_delays_expire() {
++        let mut writer = tempfile::NamedTempFile::new().unwrap();
++        writeln!(writer, "L 60").unwrap();
++        let mut queue = FileQueue::open(writer.path()).unwrap();
++        let start = Instant::now();
++        assert_eq!(keys(&mut queue, start), []);
++
++        writeln!(writer, "Enter\nW 2\nJ 1 0.5").unwrap();
++        let poll = start + READ_INTERVAL;
++        let check =
++            |queue: &mut FileQueue, millis| keys(queue, poll + Duration::from_millis(millis));
++        assert_eq!(check(&mut queue, 0), [0x0D, b'W']);
++        assert_eq!(check(&mut queue, 199), [0x0D, b'W']);
++        assert_eq!(check(&mut queue, 200), [b'W']);
++        assert_eq!(check(&mut queue, 500), [b'W', b'J']);
++        assert_eq!(check(&mut queue, 1500), [b'W']);
++        assert_eq!(check(&mut queue, 2000), []);
++    }
++
++    #[test]
++    fn complete_lines_only_and_release_cancels_pending_input() {
++        let mut writer = tempfile::NamedTempFile::new().unwrap();
++        let mut queue = FileQueue::open(writer.path()).unwrap();
++        let now = Instant::now();
++        write!(writer, "W 2").unwrap();
++        assert_eq!(keys(&mut queue, now), []);
++
++        writeln!(
++            writer,
++            "\n{}L\nW NaN\nJ 1 4\nI 1 0 extra",
++            " ".repeat(MAX_LINE)
++        )
++        .unwrap();
++        assert_eq!(keys(&mut queue, now + READ_INTERVAL), [b'W']);
++        writeln!(writer, "release\nS 1").unwrap();
++        assert_eq!(keys(&mut queue, now + 2 * READ_INTERVAL), [b'S']);
++        assert_eq!(keys(&mut queue, now + Duration::from_secs(5)), []);
++    }
++}
+diff --git a/docs/macos.md b/docs/macos.md
+index cfac9ba..2e917f2 100644
+--- a/docs/macos.md
++++ b/docs/macos.md
+@@ -23,6 +23,24 @@ The loader probe passes, so the stand-in title is mapped, bound, delay loaded an
+ - Seven shader tests need a D3D12 device with shader model 6.6. The Wine build has no D3D12 that works on Metal, so this is the GPU gap that D3DMetal has to fill.
+ - The xtask policy test starts git from inside Wine. Run `cargo xtask policy` natively instead.
+ 
++## Scripted controller input
++
++Set `VICTORY_KEYS_FILE` to a new, empty file before starting a test run. The runtime reads lines appended after GameInput starts. Under Wine, use the file's Windows path.
++
++```sh
++input=$(mktemp /tmp/scarlettmac-input.XXXXXX)
++printf 'Input queue: %s\n' "$input"
++VICTORY_KEYS_FILE="Z:$input" tools/macos/play-main-mac.sh "$game_exe"
++```
++
++After the test reaches the scene, append commands from another terminal. Set `input` there to the path printed by the first command.
++
++```sh
++printf 'W 3\nJ 2 4\nL 2 7\n' >> "$input"
++```
++
++Each line is `key [hold seconds [delay seconds]]`. A key alone taps for 0.2 seconds. `W/A/S/D` move, `I/J/K/L` move the camera, and `Enter` presses A. Holding opposite directions returns that axis to neutral. Append `release` to cancel every queued and active file command. Console controls and physical controllers still work during the test.
++
+ ## D3DMetal results, 24 November 2026
+ 
+ With the GPTK cask (`brew install --cask gcenx/wine/game-porting-toolkit`, Wine 7.7 with the D3DMetal of GPTK 1.1), VIctory gets a D3D12 device on Metal, and all 69 shader tests pass on an M4. Metal's sin and cos return 0 for NaN and infinity, where the console GPU returns NaN, so the translator now passes that NaN through. D3DMetal does not check the DXIL container hash.

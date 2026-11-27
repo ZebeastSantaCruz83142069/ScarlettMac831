@@ -14,6 +14,8 @@ Two shader patches port Belobug's wave32 work: [tiled cascade shadows on wave32]
 
 The performance recipe builds on [halfwave50's fork](https://github.com/halfwave50/VIctory-macOS-halfwave) of VIctory-macOS, GPL-3.0-or-later. Its patch adds the memory, DirectStorage, write-fault and shader changes described in [BUILD.md](BUILD.md#november-27-performance-recipe).
 
+Later performance patches adapt ideas from [DexNom](https://github.com/DexNom/VIctory/commit/921d8d3b43b44f3a6ca4b44095edd3c4baf10a87), [Foxhound](https://github.com/readmet3xt-lab/foxhound/tree/454ffead768aaf2fedab7e51f641523ce6f8a440), [Foxvic-Scarlett](https://github.com/randomkidmakesthis/foxvic-scarlett/tree/91c0fc483ba756cb97b7a3a2184b653238b76310), [Kelvaroq](https://github.com/stellarr-studio/kelvaroq/blob/92606ea7f5da5bab74e4eee7f3045b060c7020a8/native/patches/0046-async-present-frame-waits.patch), [Belobug](https://github.com/Belobug/VIctory-Belobug-AMD/commit/ae75a66acce9bec62ce5214f18d1c19650311e3f), and [hyphennn](https://github.com/fxceless/victory-fork/commit/e3307c7727a604d8847ace8751cc6623bad26b5c). The GameInput history regressions also draw on [XCL’s tests](https://github.com/xcl-dev/xcl/pull/565).
+
 VIctory-macOS builds on [Marvisak's VIctory](https://github.com/Marvisak/VIctory). Its repository ships a BCPack format table under its [asset policy](https://github.com/pragyaangaur/VIctory-macOS/blob/23ff1f7540952533b283d996a4f3f6710a6f6e85/docs/asset-policy.md). The table is supplied by the pinned upstream checkout. Its Microsoft silicon-rans attribution is recorded separately in [LICENSE-silicon-rans](LICENSE-silicon-rans).
 
 Wine, Apple's D3DMetal, the compiler toolchain, and any game files are supplied separately by their users.

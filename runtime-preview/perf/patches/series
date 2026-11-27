@@ -1,2 +1,11 @@
 0001-perf-main.patch
 0002-scarlettmac-branding.patch
+0003-Translate-pixel-DPP8-permutations-within-each-quad.patch
+0004-Add-a-queued-input-file-and-verify-GameInput-history.patch
+0005-Skip-clearing-empty-descriptor-census-slots-on-reque.patch
+0006-Allow-large-tiled-texture-uploads-to-detile-in-row-b.patch
+0007-Measure-title-pacing-queue-fence-and-host-present-wa.patch
+0008-Keep-DPP-lowering-in-its-own-module.patch
+0009-Offer-width-correct-integer-constant-folding-in-DXIL.patch
+0010-Translate-exact-FP64-counts-between-synchronized-hal.patch
+0011-Keep-shader-branch-reachability-stable-when-folding-.patch
