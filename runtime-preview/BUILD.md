@@ -89,6 +89,14 @@ WINE=/path/to/wine WINEPREFIX=/path/to/wine-prefix ./run.sh "$preview" config
 
 For an installed CrossOver bottle, point `WINE` at CrossOver's Wine executable and set `SCARLETTMAC_CROSSOVER_BOTTLE` to the name of an existing bottle with D3DMetal. Set `CX_BOTTLE_PATH` to the folder containing the bottle if it uses a custom location. The launcher stages the executable and its llvm-mingw DLL on the bottle's C: drive for the duration of the command. The `config` command checks startup and configuration before a title is supplied.
 
+On a Retina display with a scaled resolution, a plain Wine prefix draws the frame larger than the window, so the edges of the picture are cut off. Turn on Wine's Retina mode in that prefix once before the first run:
+
+```sh
+WINEPREFIX=/path/to/wine-prefix /path/to/wine reg add 'HKCU\Software\Wine\Mac Driver' /v RetinaMode /t REG_SZ /d y /f
+```
+
+In a CrossOver bottle, the same setting is **High Resolution Mode** in the bottle's settings.
+
 With a supported title supplied separately, pass `run --execute` followed by its Wine-visible executable path. In the default recipe, set `VICTORY_SNAPSHOT_POOL_MIB=256` to try retaining up to 256 MiB of free snapshot buffers. Zero disables retention. When unset or invalid, the upstream 2,048 MiB limit applies. Buffers currently needed for a submission can exceed the configured retention limit.
 
 In the default recipe, set `VICTORY_DIRECT_BARYCENTRICS=1` to enable the pixel shader fix on a D3D12 device that supports barycentrics. The runtime uses a separate shader cache for this option.
