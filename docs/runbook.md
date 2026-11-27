@@ -18,6 +18,10 @@ at sparse frame intervals, so a gap between entries alone does not establish
 a stall. Record the exit status. To show records from the matching Wine crash
 log when a run ends early, pass its path with `--crash-log`.
 
+The `black frames` row counts logged transitions from a visible frame to a
+black frame. It excludes draw details and the follow-up levels for each
+transition.
+
 The contributor’s measurements cover the
 [initial runtime baseline](measurements/2026-11-26-runtime-preview-baseline.md)
 and [written-page copies](measurements/2026-11-26-copy-written-pages.md).
