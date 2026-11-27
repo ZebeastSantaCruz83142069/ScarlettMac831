@@ -23,12 +23,12 @@ ScarlettMac rendered the prison room and responded to movement and camera input.
       <a href="assets/captures/prologue-prison-controls.jpg"><img src="assets/captures/prologue-prison-controls.jpg" width="520" alt="ScarlettMac shows Lucia at the prison window with movement and camera prompts"></a>
     </td>
     <td width="50%" align="center">
-      <a href="assets/captures/prologue-cellmate-objective.jpg"><img src="assets/captures/prologue-cellmate-objective.jpg" width="520" alt="Lucia across the prison room with the prompt to approach a cellmate"></a>
+      <a href="assets/captures/prologue-prison-room.jpg"><img src="assets/captures/prologue-prison-room.jpg" width="520" alt="A side view of Lucia beside the prison bunks with a dialogue subtitle"></a>
     </td>
   </tr>
   <tr>
     <td align="center"><strong>Movement and camera tutorial</strong></td>
-    <td align="center"><strong>Next objective after walking across the room</strong></td>
+    <td align="center"><strong>Prison room during the movement test</strong></td>
   </tr>
 </table>
 
