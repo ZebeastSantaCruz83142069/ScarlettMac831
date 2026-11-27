@@ -9,3 +9,4 @@
 0009-Offer-width-correct-integer-constant-folding-in-DXIL.patch
 0010-Translate-exact-FP64-counts-between-synchronized-hal.patch
 0011-Keep-shader-branch-reachability-stable-when-folding-.patch
+0012-Hash-the-host-s-address-maps-with-the-fold-hasher.patch
