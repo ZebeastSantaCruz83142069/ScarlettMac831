@@ -560,7 +560,7 @@ def metrics(info):
     counts = {
         "dropped shaders": "shader does not translate",
         "dropped draws": "without a host pipeline",
-        "black frames": "black frame",
+        "black frames": "a black frame after a frame that was not",
         "unordered views the host cannot store": "unordered view in a format the host cannot store",
         "depth bounds ignored": "no depth bounds test",
         "slow submissions": "slow host submission",
