@@ -1,6 +1,6 @@
 # ScarlettMac Runtime Preview
 
-ScarlettMac Runtime Preview builds an x86-64 Windows executable for Apple Silicon Macs running Wine and Rosetta. Both recipes identify the runtime as ScarlettMac in the window title and CLI help. The default VIctory-macOS recipe includes a cap for recycled CPU snapshot buffers and an opt-in fix for direct pixel-center barycentrics, the weights a pixel shader uses to interpolate across a triangle. The ScarlettMac XCL build has its own source and license.
+ScarlettMac Runtime Preview builds an x86-64 Windows executable for Apple Silicon Macs running Wine and Rosetta. The default and checkpoint recipes identify the runtime as ScarlettMac in the window title and CLI help. The default VIctory-macOS recipe includes a cap for recycled CPU snapshot buffers and an opt-in fix for direct pixel-center barycentrics, the weights a pixel shader uses to interpolate across a triangle. The ScarlettMac XCL build has its own source and license.
 
 ## Build and test
 
@@ -41,6 +41,35 @@ Run `config` as shown below with the checkpoint's `target/x86_64-pc-windows-gnul
 | `VICTORY_WAVE64_REDUCE=1` | Enables experimental translation of supported 64-lane wave operations on 32-lane GPUs. |
 
 Under Wine, the checkpoint skips mesh pipelines that still exceed Metal's 32 KiB output limit. Submission diagnostics identify the pipelines on a native GPU wait that exceeds eight seconds. A queue's held work now runs before its next memory wait is tested, so a wait no longer passes or holds on a value that earlier work in the same queue overwrites. Without this, the Series S intro could stall in `Prestream` and end at the title's `+0x23cf683` or `+0x2215c35` check. Guarded development tests on an M3 Max rendered parts of the Series S opening with severe visual artifacts. The local tests used additional launcher settings, and repeatable player and camera control remain unverified.
+
+## November 27 performance recipe
+
+The optional performance recipe pins a [VIctory-macOS fork](perf/UPSTREAM) and applies one [patch](perf/patches/series). In the Series S intro on a 24 GB M5 Pro, the game world ran at about 4 fps, up from about 1 fps. The median frame took 225 to 255 ms, and the slowest 5% took 0.3 to 0.4 s.
+
+| World frames in the first 120 s | Runs |
+| --- | --- |
+| Same source before the November 27 changes | about 140 to 160 |
+| This recipe, release build | 474, 509, 508, 508, 528 |
+
+What changed:
+
+- Fewer DirectStorage reader threads (6, not one per core). Wine serializes the memory-map calls these threads make, so 18 readers mostly waited on each other. This roughly doubled the frame rate.
+- The memory guard now runs under D3DMetal, which reports separate video memory on a unified-memory Mac. Large textures load their top mip at half size (`VICTORY_TEXTURE_DROP_MIPS=0` restores full detail). Swap growth over 4 minutes fell from 3 to 5 GB to under 0.4 GB.
+- Write faults that Wine reports with extra protection bits, or on pages reserved first and committed later, are healed instead of crashing.
+- A compute shader that reads a buffer's size from its descriptor is now translated instead of dropped.
+
+Prepare the source, build its patched Wine, then play with the measured settings:
+
+```sh
+./build.sh --perf --prepare "$HOME/scarlettmac-perf-src"
+cd "$HOME/scarlettmac-perf-src"
+tools/macos/build-crossover-wine.sh
+tools/macos/play-main-mac.sh /path/to/the/game/executable
+```
+
+`play-main-mac.sh` builds a release executable and sets every switch the numbers were measured with. A setting you export first wins. `LLVM_MINGW_ROOT=/path/to/llvm-mingw SCARLETTMAC_BUILD_PROFILE=release ./build.sh --perf NEW_SOURCE_DIR` builds only the executable. Without `SCARLETTMAC_BUILD_PROFILE` it builds the slower diagnostics profile.
+
+Known issues: after 4 to 5 minutes, swap grows again by about 2 GB and some minutes drop to 1 fps. The opening credits show a flat green panel where a video should play. `VICTORY_COPY_FAST` and `VICTORY_ALIAS_BUFFERS` are off by default because both still crash.
 
 ## Wine startup
 
