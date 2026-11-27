@@ -13,7 +13,9 @@
 
 ## Prologue movement and camera on M3 Max
 
-<sub>November 27, 2026 · MacBook Pro, M3 Max, 48 GB · CrossOver Wine + D3DMetal · Series S, 720p output</sub>
+<p align="center">
+  <img src="https://img.shields.io/badge/First%20movement%20and%20camera%20controls%20work-D1242F?style=for-the-badge" alt="First movement and camera controls work">
+</p>
 
 ScarlettMac rendered the prison room and responded to movement and camera input. Opposite camera inputs turned the view in opposite directions, with a steady view between them. Movement input walked Lucia away from the window and across the room. The tutorial advanced to the prompt to approach a cellmate.
 
@@ -37,7 +39,6 @@ Frame rate was roughly 1 to 3 fps during the room test. Part of the opening show
 ## Earlier opening captures
 
 <p align="center">
-  <img src="https://img.shields.io/badge/First%20character%20close--up%20on%20MacBook-D1242F?style=for-the-badge" alt="First character close-up on MacBook"><br>
   <sub>November 26, 2026</sub>
 </p>
 
