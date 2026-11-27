@@ -89,6 +89,14 @@ WINE=/path/to/wine WINEPREFIX=/path/to/wine-prefix ./run.sh "$preview" config
 
 For an installed CrossOver bottle, point `WINE` at CrossOver's Wine executable and set `SCARLETTMAC_CROSSOVER_BOTTLE` to the name of an existing bottle with D3DMetal. Set `CX_BOTTLE_PATH` to the folder containing the bottle if it uses a custom location. The launcher stages the executable and its llvm-mingw DLL on the bottle's C: drive for the duration of the command. The `config` command checks startup and configuration before a title is supplied.
 
+If the picture is clipped because the frame is larger than its window on a scaled Retina display, try enabling Retina mode in the affected plain Wine prefix. A contributor verified this workaround on an M5 Max with the November 26 checkpoint and D3DMetal 4.0 beta 3 at a scaled 3008 × 1692 desktop.
+
+```sh
+WINEPREFIX="/path/to/wine-prefix" "/path/to/wine" reg add 'HKCU\Software\Wine\Mac Driver' /v RetinaMode /t REG_SZ /d y /f
+```
+
+In CrossOver, try **High Resolution Mode** in the affected bottle's settings. High-resolution mode changes the DPI reported to the application, and some applications can render incorrectly with it enabled. Leave it off if the picture already fits. [CrossOver Mac advanced settings](https://support.codeweavers.com/en_US/advanced-settings-in-crossover-mac-26)
+
 With a supported title supplied separately, pass `run --execute` followed by its Wine-visible executable path. In the default recipe, set `VICTORY_SNAPSHOT_POOL_MIB=256` to try retaining up to 256 MiB of free snapshot buffers. Zero disables retention. When unset or invalid, the upstream 2,048 MiB limit applies. Buffers currently needed for a submission can exceed the configured retention limit.
 
 In the default recipe, set `VICTORY_DIRECT_BARYCENTRICS=1` to enable the pixel shader fix on a D3D12 device that supports barycentrics. The runtime uses a separate shader cache for this option.
