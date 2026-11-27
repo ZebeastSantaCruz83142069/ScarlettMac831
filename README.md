@@ -162,7 +162,7 @@ Apple M3 Max with CrossOver Preview 27.0.0.41073 and D3DMetal 4.0b3.
 | Test | Result |
 | --- | --- |
 | GTA VI on XCL | Menus and world loading reached |
-| Xbox system checks | 43, 44, and 43 of 50 passed |
+| XCL synthetic system checks | 44/50 on CrossOver Preview with D3DMetal 4.0 beta 3 and 47/50 on CrossOver 26.3 with D3DMetal 3.0 |
 | TuxBox Lanes | Scripted replay passed with input and rendered-board checks |
 
 [Measurements, known issues, and reproduction steps](docs/compatibility.md)

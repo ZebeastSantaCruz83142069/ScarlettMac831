@@ -66,6 +66,8 @@ cleanup() {
     rmdir "$lock"
 }
 trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 if [[ -L "$drive" || -e "$drive" ]]; then
     if [[ ! -L "$drive" || ${drive:A} != "$game_root" ]]; then

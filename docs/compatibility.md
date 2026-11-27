@@ -166,7 +166,20 @@ Both late Series S compute shaders compiled offline and produced two D3DMetal pi
 
 ## Xbox system checks
 
-Three runs of XCL's synthetic test title returned 43, 44, and 43 passes out of 50. 43 checks passed in all three runs. One varied and six failed in all three.
+### November 27 follow-up
+
+| M3 Max test environment | Before the DirectStorage fix | With the fix | Check 35 |
+| --- | ---: | ---: | --- |
+| CrossOver Preview 27.0.0.41073, D3DMetal 4.0 beta 3 | 43/50 | 44/50 | Passed both runs |
+| CrossOver 26.3.0.39832, D3DMetal 3.0 | 47/50 | 47/50 | Passed both runs |
+
+The Preview comparison used the same dedicated bottle and fresh test state. Check 46 passed with the fix. XCL now accepts a fence it already tracks even when Wine's memory query cannot classify the object, and still validates its method table and retains a reference for the queued signal. Preview's remaining failures were checks 11 and 37 through 41. Stable CrossOver's three failures were window cloaking, the GPU timestamp and XMA2 audio state.
+
+The stable CrossOver trial on M3 Max completed without the Check 35 timeout. The original M5 Pro configuration still needs a retest with the split draw and readback from the current fixture. The earlier M4 Pro and M5 Max reports each recorded 44/50 and matched the six recurring failures below. [M5 Pro timeout](https://github.com/paveledits/ScarlettMac/issues/5) · [M4 Pro report](https://github.com/paveledits/ScarlettMac/issues/10) · [M5 Max report](https://github.com/paveledits/ScarlettMac/issues/12)
+
+### Earlier Preview baseline
+
+Three runs of XCL's synthetic test title returned 43, 44, and 43 passes out of 50. Of the 50 checks, 43 passed in all three runs, one varied, and six failed in all three.
 
 | Check | Subsystem | Observed result |
 | --- | --- | --- |
@@ -188,7 +201,7 @@ The retail launcher read the game from a read-only SSD share in Windows 11 Arm. 
 
 ## Reproduce the compatibility checks
 
-Build XCL's synthetic Xbox Series test title from source and run it in the same bottle. Each test run gets fresh state because the fixture exercises file deletion. The process exits with the number of failed checks. Our clean runs exited with 6 or 7 failures, with one intermittent GPU-memory check accounting for the difference.
+Build XCL's synthetic Xbox Series test title from source and run it in the same bottle. Each test run gets fresh state because the fixture exercises file deletion. The process exits with the number of failed checks. The expected exit status depends on the runtime and backend. See the latest synthetic results above.
 
 ```sh
 scripts/build.sh --test-title

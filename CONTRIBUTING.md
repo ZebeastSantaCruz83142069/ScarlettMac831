@@ -33,7 +33,9 @@ scripts/build.sh --test-title
 scripts/run.sh --test-title
 ```
 
-The launcher creates fresh test data for each run. The test exits with the number of failed checks. The three documented runs returned 7, 6, and 7. Record the test names and the relevant output so someone else can compare the result. [Compatibility notes](docs/compatibility.md)
+The launcher creates fresh test data for each run. The test exits with the number of failed checks. Record the test names, CrossOver and D3DMetal versions, and the relevant output so someone else can compare the result. [Synthetic test results](docs/compatibility.md#xbox-system-checks)
+
+If a forced stop leaves the bottle busy or leaves G: pointing at a previous run, confirm the bottle has stopped in CrossOver first. Use a fresh dedicated bottle with `SCARLETT_BOTTLE_DIR`, or inspect the old bottle's `dosdevices/g:` link and remove it only if it points at the previous ScarlettMac run. Remove the empty `.scarlett-lab-run` directory only after confirming that no launcher is using the bottle.
 
 ## Report a result
 
@@ -46,5 +48,5 @@ Include the smallest useful log excerpt with the first relevant error and the li
 Work on a branch in your fork. Keep changes focused and include the commands and hardware you used to verify them.
 
 - Launcher changes belong in [scripts](scripts/).
-- XCL changes belong in [mac-compat.patch](patches/mac-compat.patch), against the pinned source prepared in `.build/xcl-mac`. Keep the generated checkout and build outputs out of the pull request.
+- XCL changes belong in [mac-compat.patch](patches/mac-compat.patch) or a follow-on patch, against the pinned source prepared in `.build/xcl-mac`. Keep the generated checkout and build outputs out of the pull request.
 - Link the upstream issue or commit for imported changes and preserve their attribution. [Source provenance](SOURCE-NOTICES.md)

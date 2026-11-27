@@ -1,0 +1,31 @@
+diff --git a/crates/xcl/src/hle/d3d12x/real.rs b/crates/xcl/src/hle/d3d12x/real.rs
+index c4b6f32..d8199c6 100644
+--- a/crates/xcl/src/hle/d3d12x/real.rs
++++ b/crates/xcl/src/hle/d3d12x/real.rs
+@@ -5245,7 +5245,7 @@ pub(super) fn note_newer_device_method(slot: usize) {
+ }
+
+ /// Whether `p` is a fence the title created.
+-fn is_fence(p: usize) -> bool {
++pub(in crate::hle) fn is_fence(p: usize) -> bool {
+     p != 0 && FENCES.read().unwrap_or_else(|e| e.into_inner()).contains(&p)
+ }
+
+diff --git a/crates/xcl/src/hle/dstorage.rs b/crates/xcl/src/hle/dstorage.rs
+index 1a95374..e030330 100644
+--- a/crates/xcl/src/hle/dstorage.rs
++++ b/crates/xcl/src/hle/dstorage.rs
+@@ -1423,7 +1423,12 @@ unsafe extern "system" fn queue_enqueue_status(p: *mut c_void, array: *mut c_voi
+
+ unsafe extern "system" fn queue_enqueue_signal(p: *mut c_void, fence: *mut c_void, value: u64) {
+     let q = queue(p);
+-    if q.closed.load(Ordering::Acquire) || fence.is_null() || !crate::gpu::shader::readable(fence as usize, std::mem::size_of::<usize>()) {
++    if q.closed.load(Ordering::Acquire) || fence.is_null() {
++        return;
++    }
++    if !super::d3d12x::real::is_fence(fence as usize)
++        && !crate::gpu::shader::readable(fence as usize, std::mem::size_of::<usize>())
++    {
+         return;
+     }
+     let vt = *(fence as *const *const usize);

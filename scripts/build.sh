@@ -47,6 +47,7 @@ prepare_patches() {
     fi
 }
 prepare_patches
+apply_patch_once "$root/patches/dstorage-fence.patch"
 
 if [[ $mode != --prepare ]]; then
     : "${SCARLETT_LLVM_MINGW:?Set SCARLETT_LLVM_MINGW to the extracted LLVM-MinGW directory}"
