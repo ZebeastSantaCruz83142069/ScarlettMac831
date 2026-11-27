@@ -158,13 +158,26 @@ XCL supplies Xbox system services. Rosetta 2 runs the game’s x64 code, and D3D
 
 ## Tested on Mac
 
-Apple M3 Max with CrossOver Preview 27.0.0.41073 and D3DMetal 4.0b3.
+Results through November 27, 2026. Community game results are contributor reports. FPS depends on the scene, build, and settings in each report.
 
-| Test | Result |
-| --- | --- |
-| GTA VI on XCL | Menus and world loading reached |
-| XCL synthetic system checks | 44/50 on CrossOver Preview with D3DMetal 4.0 beta 3 and 47/50 on CrossOver 26.3 with D3DMetal 3.0 |
-| TuxBox Lanes | Scripted replay passed with input and rendered-board checks |
+| Mac | Date | Game result | XCL synthetic system checks |
+| --- | --- | --- | --- |
+| MacBook Pro, M3 Max, 48 GB | Nov 27 | ScarlettMac rendered the lit Prologue prison room. Movement and camera response were verified at roughly 1 to 3 FPS. Part of the opening showed subtitles over black. [Controls trial](docs/compatibility.md#november-27-in-world-controls) | 44/50 on CrossOver Preview with D3DMetal 4.0 beta 3. 47/50 on CrossOver 26.3 with D3DMetal 3.0. [System checks](docs/compatibility.md#november-27-follow-up) |
+| MacBook Pro, M3 Pro, 18 GB | Nov 26 | The Series S checkpoint with wave64 changes rendered a lit street and character. Frames took 2 to 30 seconds. [Contributor test](https://github.com/paveledits/ScarlettMac/pull/6) | |
+| M4 Pro, 24 GB | Nov 27 | A Discord tester reported finishing the intro. The exact game build is unspecified. [Discord report](https://discord.com/channels/1575463431388135525/1575463432075874447/1575847149382406155) | 44/50. [System checks](https://github.com/paveledits/ScarlettMac/issues/10) |
+| M5 Pro, 24 GB | Nov 26 to 27 | The Series S performance recipe rendered the intro world at about 4 FPS. The opening video was green, and some periods dropped to about 1 FPS as swap grew. [Contributor test](https://github.com/paveledits/ScarlettMac/pull/11) | 33 of the first 34 checks passed. The run stalled at check 35. [System checks](https://github.com/paveledits/ScarlettMac/issues/5) |
+| M5 Max, 128 GB | Nov 27 | Warm world medians were 3.9 to 4.1 FPS on Series S and 3.2 to 3.6 FPS on Series X. The opening stayed black. [Contributor test](https://github.com/paveledits/ScarlettMac/pull/14) | 44/50. [System checks](https://github.com/paveledits/ScarlettMac/issues/12) |
+
+The M3 Max also passed the scripted TuxBox Lanes replay on November 24, including input and rendered-board checks. [Replay procedure](docs/compatibility.md#reproduce-the-tuxbox-lanes-replay)
+
+### Other community runtimes
+
+| Mac | Date | Reported result |
+| --- | --- | --- |
+| M1 Max, 64 GB | Nov 27 | A community XCL fork showed the minimap and spawned Lucia in the game world. [Discord report](https://discord.com/channels/1575463431388135525/1575463432075874447/1575840872954728478) |
+| M2 Pro, 32 GB | Nov 27 | The same tester reported better results than on their M1 Max in their own XCL tests. FPS and scene details are unspecified. [Discord report](https://discord.com/channels/1575463431388135525/1575463432075874447/1575688832702095361) |
+| MacBook Air, M4, 16 GB | Nov 26 | Native-Victory-macOS played intermittent opening audio over a black picture and later crashed. [Native runtime report](https://github.com/LakshanSivakumar/Native-Victory-macOS/issues/140) |
+| MacBook Pro, M5, 24 GB | Nov 26 | A native Series X build reached opening audio over a black picture after loading. [Discord report](https://discord.com/channels/1575463431388135525/1575463432075874447/1575643988923384018) |
 
 [Measurements, known issues, and reproduction steps](docs/compatibility.md)
 
