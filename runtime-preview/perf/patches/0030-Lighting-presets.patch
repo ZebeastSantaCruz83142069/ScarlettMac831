@@ -1,0 +1,27 @@
+diff --git a/tools/macos/play-main-mac.sh b/tools/macos/play-main-mac.sh
+index 5e4f6be405815c5c58b9c26c28250fe3b29ddc52..f7b5a28e54d0aff88f09d225624da679cf2abdaf 100755
+--- a/tools/macos/play-main-mac.sh
++++ b/tools/macos/play-main-mac.sh
+@@ -8,8 +8,20 @@ d() { eval "[ -n \"\${$1+x}\" ]" || export "$1=$2"; }
+ d VICTORY_PATCH_MASKED all;        d VICTORY_FAULT_TRACKING 1
+ d VICTORY_HALVES_LOCAL 1;          d VICTORY_HALVES_SHARED_LDS 1
+ d VICTORY_HALVES_EXCHANGE 1;       d VICTORY_HALVES_WALK 1
+-d VICTORY_WAVE64_REDUCE 1;         d VICTORY_BUILDER_EXACT 1
+-d VICTORY_GUARD_LOOKUP 1;          d VICTORY_AMBIENT 0
++d VICTORY_GUARD_LOOKUP 1
++case ${SCARLETTMAC_LIGHTING:-estimate} in
++    estimate) d VICTORY_AMBIENT estimate ;;
++    fallback) d VICTORY_AMBIENT 1.0 ;;
++    exact)
++        d VICTORY_WAVE64_REDUCE 1
++        d VICTORY_BUILDER_EXACT 1
++        d VICTORY_AMBIENT 0
++        ;;
++    *)
++        printf '%s\n' 'SCARLETTMAC_LIGHTING must be estimate, fallback, or exact.' >&2
++        exit 2
++        ;;
++esac
+ d VICTORY_MAPDATA_BUDGET 40;       d VICTORY_COPY_ORDER split
+ d VICTORY_BATCH_CLAMPS 1;          d VICTORY_UAV_SIZE_LEVEL0 07f451a14b13fecb
+ d VICTORY_TEXTURE_BACK 256x256f41,256x256f16,64x64f16,128x128f36

@@ -78,7 +78,17 @@ tools/macos/play-main-mac.sh "/path/to/the/game/executable" --console series-s
 
 Known issues: after 4 to 5 minutes, swap grows again by about 2 GB and some minutes drop to 1 fps. The opening credits show a flat green panel where a video should play. `VICTORY_COPY_FAST` and `VICTORY_ALIAS_BUFFERS` are off by default because both still crash.
 
-The performance recipe also includes pixel DPP8 translation when every read stays in its destination quad. Its address-keyed maps use a cheaper hash than Rust's default, which saved about 7 ms of submitting-thread time per frame on a 24 GB M5 Pro. `play-main-mac.sh` now runs the title's own compute BVH builder and uses the title's own lighting: it sets `VICTORY_WAVE64_REDUCE=1`, `VICTORY_BUILDER_EXACT=1` and `VICTORY_AMBIENT=0`. Before, with `VICTORY_HALVES_LOCAL` the builder never ran, so the probes traced against nothing, and faces and anything the sun does not reach directly came out nearly black. Dropped draws fell from about 1,400 a frame to 1 or 2. The release build costs about 15%: 424 and 464 world frames in the first 120 s against 519 with the constant stand-in. Export `VICTORY_WAVE64_REDUCE=0 VICTORY_BUILDER_EXACT=0 VICTORY_AMBIENT=1.0` for the faster constant light; `VICTORY_WAVE64_REDUCE=1` without the builder leaves green speckles. The following switches are opt-in.
+The performance recipe includes pixel DPP8 translation when every read stays in its destination quad and a cheaper hash for address-keyed maps. The contributor measured about 7 ms less submitting-thread work per frame on a 24 GB M5 Pro.
+
+Set `SCARLETTMAC_LIGHTING` when invoking `play-main-mac.sh` to choose a lighting preset. Exported `VICTORY_*` settings take precedence.
+
+| Preset | Effect |
+| --- | --- |
+| `estimate` (default) | Uses the existing indirect-light estimator. |
+| `fallback` | Uses the alternative indirect light from PR #15, with the renderer's existing level and sky settings. |
+| `exact` | Requests the title's BVH builder and native lighting from PR #20. It sets `VICTORY_WAVE64_REDUCE=1`, `VICTORY_BUILDER_EXACT=1` and `VICTORY_AMBIENT=0`. The builder opens only if all its programs translate exactly. |
+
+On the contributor's M5 Pro, exact lighting restored more of the opening and reduced dropped draws, with 424 and 464 world frames in the first 120 seconds compared with 519 using fallback light. On our M3 Max, all 53 programs passed the builder gate and more of the café scene appeared. Some dialogue frames stayed black, the prison room was darker, and performance varied with the scene. [PR #15](https://github.com/paveledits/ScarlettMac/pull/15) · [PR #20](https://github.com/paveledits/ScarlettMac/pull/20)
 
 | Setting | Purpose |
 | --- | --- |
