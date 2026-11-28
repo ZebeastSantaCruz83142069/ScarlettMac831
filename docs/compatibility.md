@@ -175,7 +175,7 @@ Both late Series S compute shaders compiled offline and produced two D3DMetal pi
 
 The Preview comparison used the same dedicated bottle and fresh test state. Check 46 passed with the fix. XCL now accepts a fence it already tracks even when Wine's memory query cannot classify the object, and still validates its method table and retains a reference for the queued signal. Preview's remaining failures were checks 11 and 37 through 41. Stable CrossOver's three failures were window cloaking, the GPU timestamp and XMA2 audio state.
 
-The stable CrossOver trial on M3 Max completed without the Check 35 timeout. The original M5 Pro configuration still needs a retest with the split draw and readback from the current fixture. The earlier M4 Pro and M5 Max reports each recorded 44/50 and matched the six recurring failures below. [M5 Pro timeout](https://github.com/paveledits/ScarlettMac/issues/5) · [M4 Pro report](https://github.com/paveledits/ScarlettMac/issues/10) · [M5 Max report](https://github.com/paveledits/ScarlettMac/issues/12)
+The original 24 GB M5 Pro tester reran the split draw and readback on ScarlettMac `f4b08d9` with CrossOver 26.3.0.39832 and D3DMetal 3.0. Check 35 passed without a sparse-fence or Metal timeout. The suite finished at 47/50. The earlier M4 Pro and M5 Max reports each recorded 44/50 and matched the six recurring failures below. [M5 Pro retest](https://github.com/paveledits/ScarlettMac/issues/5#issuecomment-7225782573) · [M4 Pro report](https://github.com/paveledits/ScarlettMac/issues/10) · [M5 Max report](https://github.com/paveledits/ScarlettMac/issues/12)
 
 ### Earlier Preview baseline
 
